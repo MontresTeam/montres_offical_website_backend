@@ -11,7 +11,7 @@ const sendOrderConfirmation = require("../utils/sendOrderConfirmation");
 // ✅ Helper to get Tabby history
 const getTabbyHistory = async (userId) => {
   let buyerHistory = {
-    registered_since: new Date().toISOString().split('T')[0],
+    registered_since: new Date().toISOString(),
     loyalty_level: 0,
     wishlist_count: 0,
     is_social_networks_connected: false,
@@ -31,7 +31,7 @@ const getTabbyHistory = async (userId) => {
       });
 
       buyerHistory = {
-        registered_since: user.createdAt ? user.createdAt.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        registered_since: user.createdAt ? user.createdAt.toISOString() : new Date().toISOString(),
         loyalty_level: successCount,
         wishlist_count: user.wishlistGroups?.reduce((acc, g) => acc + (g.items?.length || 0), 0) || 0,
         is_social_networks_connected: !!user.googleId,
@@ -295,6 +295,10 @@ const createSession = async (req, res) => {
       },
     };
 
+    if (!tabbyPayload.payment.buyer.phone || tabbyPayload.payment.buyer.phone === "+") {
+      tabbyPayload.payment.buyer.phone = "+971500000001";
+    }
+
     const response = await axios.post("https://api.tabby.ai/api/v2/checkout", tabbyPayload, {
       headers: {
         Authorization: `Bearer ${process.env.TABBY_SECRET_KEY}`,
@@ -415,7 +419,7 @@ const createTabbyOrder = async (req, res) => {
       title: item.name,
       description: item.name,
       quantity: item.quantity,
-      unit_price: Number(item.price.toFixed(2)),
+      unit_price: Number(item.price || 0).toFixed(2),
       category: "Watch",
       image_url: item.image || "https://www.montres.ae/logo.png",
       product_url: item.productId ? `${clientUrl}/product/${item.productId}` : clientUrl,
@@ -475,18 +479,18 @@ const createTabbyOrder = async (req, res) => {
       const lang = req.body.lang || req.body.language || "en";
       let userMessage = response.data.status === "rejected" ? "Tabby has rejected this order" : "Tabby checkout unavailable";
 
-      if (rejectionReason === 'not_eligible') {
+      if (rejectionReason === 'not_eligible' || rejectionReason === 'customer_not_eligible') {
         userMessage = lang === 'ar'
-          ? "عذراً، هذا الطلب غير مؤهل للدفع بواسطة تابي."
-          : "Sorry, this order is not eligible for payment via Tabby.";
-      } else if (rejectionReason === 'order_amount_too_high') {
+          ? "نأسف، تابي غير قادرة على الموافقة على هذه العملية. الرجاء استخدام طريقة دفع أخرى."
+          : "Sorry, Tabby is unable to approve this purchase. Please use an alternative payment method for your order.";
+      } else if (rejectionReason === 'order_amount_too_high' || rejectionReason === 'not_enough_limit') {
         userMessage = lang === 'ar'
-          ? "مبلغ الطلب يتجاوز الحد المسموح به لشركة تابي."
-          : "The order amount exceeds the limit allowed by Tabby.";
+          ? "قيمة الطلب تفوق الحد الأقصى المسموح به حاليًا مع تابي. يُرجى تخفيض قيمة السلة أو استخدام وسيلة دفع أخرى."
+          : "This purchase is above your current spending limit with Tabby, try a smaller cart or use another payment method";
       } else if (rejectionReason === 'order_amount_too_low') {
         userMessage = lang === 'ar'
-          ? "مبلغ الطلب أقل من الحد المسموح به لشركة تابي."
-          : "The order amount is below the limit allowed by Tabby.";
+          ? "قيمة الطلب أقل من الحد الأدنى المطلوب لاستخدام خدمة تابي. يُرجى زيادة قيمة الطلب أو استخدام وسيلة دفع أخرى."
+          : "The purchase amount is below the minimum amount required to use Tabby, try adding more items or use another payment method";
       }
 
       return res.status(400).json({

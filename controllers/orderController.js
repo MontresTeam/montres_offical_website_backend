@@ -262,6 +262,22 @@ const calculateShipping = async (req, res) => {
   }
 };
 
+const deleteOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findByIdAndDelete(id);
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    return res.json({ success: true, message: "Order deleted successfully" });
+  } catch (error) {
+    console.error("Delete Order Error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 module.exports = {
   createStripeOrder,
   getOrderById,
@@ -276,4 +292,5 @@ module.exports = {
   updateBillingAddress,
   updateShippingAddress,
   calculateShipping,
+  deleteOrder,
 };

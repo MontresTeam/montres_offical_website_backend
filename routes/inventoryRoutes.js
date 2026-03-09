@@ -24,6 +24,7 @@ router.post("/", createInventory);
 router.put("/updated/:id", updateInventory);
 router.delete("/:id", deleteInventory);
 router.get("/reports/month-end", getInventoryMonthEndReports);
+router.get("/reports/monthly-sales", getMonthlySalesReport);
 router.post("/reports/calculate-month-end", calculateInventoryMonthEnd);
 router.post("/import", upload.single("file"), importInventory);
 router.get("/export", exportInventory);

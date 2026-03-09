@@ -16,6 +16,7 @@ const {
   updateBillingAddress,
   updateShippingAddress,
   calculateShipping,
+  deleteOrder,
 } = require("../controllers/orderController");
 
 // ✅ Place this route BEFORE /:id
@@ -38,6 +39,7 @@ router.delete("/billing/:id", protect, deleteBillingAddress);
 router.put("/billing-address/:id", protect, updateBillingAddress)
 
 router.get("/", adminProtect, getAllOrders);
+router.delete("/:id", adminProtect, deleteOrder);
 
 // Dynamic route LAST
 router.get("/:id", getOrderById);

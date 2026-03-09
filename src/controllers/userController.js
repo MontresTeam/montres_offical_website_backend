@@ -61,14 +61,16 @@ const Registration = async (req, res) => {
       .cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 15 * 24 * 60 * 60 * 1000,
+        sameSite: "lax",
+        maxAge: 15 * 60 * 1000, // 15 minutes
+        path: "/",
       })
       .cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: "/",
       })
       .status(201)
       .json({
@@ -108,14 +110,16 @@ const Login = async (req, res) => {
       .cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 15 * 24 * 60 * 60 * 1000,
+        sameSite: "lax",
+        maxAge: 15 * 60 * 1000, // 15 minutes
+        path: "/",
       })
       .cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: "/",
       })
       .status(200)
       .json({
@@ -132,7 +136,8 @@ const logout = async (req, res) => {
     const cookieOpts = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "lax",
+      path: "/",
     };
     res.clearCookie("accessToken", cookieOpts);
     res.clearCookie("refreshToken", cookieOpts);
@@ -167,8 +172,9 @@ const RefreshToken = async (req, res) => {
         res.cookie("accessToken", newAccessToken, {
           httpOnly: true,
           secure: process.env.NODE_ENV === "production",
-          sameSite: "strict",
-          maxAge: 15 * 24 * 60 * 60 * 1000,
+          sameSite: "lax",
+          maxAge: 15 * 60 * 1000,
+          path: "/",
         });
 
         return res.status(200).json({ message: "Token refreshed" });
@@ -1086,14 +1092,16 @@ const googleSignup = async (req, res) => {
       .cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 15 * 24 * 60 * 60 * 1000,
+        sameSite: "lax",
+        maxAge: 15 * 60 * 1000,
+        path: "/",
       })
       .cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: "/",
       })
       .status(200)
       .json({
@@ -1133,14 +1141,16 @@ const facebookSignup = async (req, res) => {
       .cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 15 * 24 * 60 * 60 * 1000,
+        sameSite: "lax",
+        maxAge: 15 * 60 * 1000,
+        path: "/",
       })
       .cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: "/",
       })
       .status(200)
       .json({

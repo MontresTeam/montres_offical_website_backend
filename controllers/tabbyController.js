@@ -151,13 +151,26 @@ const getTabbyHistory = async (userId, email, phone, excludeOrderId = null) => {
 
   if (userId && mongoose.Types.ObjectId.isValid(userId)) {
     userObject = await userModel.findById(userId).lean();
-    if (userObject) {
-      registeredEmail = registeredEmail || userObject.email?.toLowerCase();
-      registeredPhone = registeredPhone || userObject.phone;
-    }
+  } else if (registeredEmail) {
+    userObject = await userModel.findOne({ email: registeredEmail }).lean();
+  }
+
+  if (userObject) {
+    registeredEmail = registeredEmail || userObject.email?.toLowerCase();
+    registeredPhone = registeredPhone || userObject.phone;
+  }
+
+  const identityId = userObject?._id?.toString() || userId?.toString();
+  let consistentBuyerId = identityId;
+  if (!consistentBuyerId && registeredEmail) {
+    consistentBuyerId = "guest_" + crypto.createHash("md5").update(registeredEmail).digest("hex").substring(0, 12);
+  } else if (!consistentBuyerId) {
+    consistentBuyerId = phone ? "guest_" + phone.replace(/\D/g, "") : "guest_" + Date.now();
   }
 
   // 2. Build Matching Conditions for History
+  // We strictly match by userId or email. PHONE is excluded because it's not a unique identifier
+  // (multiple users often share test numbers like +971500000001, leading to mixed histories).
   const conditions = [];
   if (userId && mongoose.Types.ObjectId.isValid(userId)) {
     conditions.push({ userId: userId });
@@ -165,8 +178,18 @@ const getTabbyHistory = async (userId, email, phone, excludeOrderId = null) => {
   if (registeredEmail) {
     conditions.push({ "shippingAddress.email": registeredEmail });
   }
-  if (registeredPhone) {
-    conditions.push({ "shippingAddress.phone": registeredPhone });
+
+  // Safety: If no identifiers (no user or email), return default empty history
+  if (conditions.length === 0) {
+    const defaultHistory = {
+      registered_since: new Date().toISOString(),
+      loyalty_level: 0,
+      wishlist_count: 0,
+      is_social_networks_connected: false,
+      is_phone_number_verified: true,
+      is_email_verified: true
+    };
+    return { buyerHistory: defaultHistory, orderHistory: [], consistentBuyerId: "guest_" + Date.now() };
   }
 
   // 3. Find Absolute Earliest Registration Date (True Account Age)
@@ -200,7 +223,7 @@ const getTabbyHistory = async (userId, email, phone, excludeOrderId = null) => {
 
   // 4. Initialize Core Buyer History Object
   let buyerHistory = {
-    registered_since: earliestDate ? new Date(earliestDate).toISOString() : null,
+    registered_since: earliestDate ? new Date(earliestDate).toISOString() : new Date().toISOString(),
     loyalty_level: 0,
     wishlist_count: userObject?.wishlistGroups?.reduce((acc, g) => acc + (g.items?.length || 0), 0) || 0,
     is_social_networks_connected: !!userObject?.googleId,
@@ -210,10 +233,6 @@ const getTabbyHistory = async (userId, email, phone, excludeOrderId = null) => {
 
   let orderHistory = [];
 
-  // Safety: If no identifiers (no user, email, or phone), return default empty history
-  if (conditions.length === 0) {
-    return { buyerHistory, orderHistory };
-  }
 
   // 5. Fetch Loyalty Stats and Order History from WHOLE database
   if (conditions.length > 0) {
@@ -252,33 +271,52 @@ const getTabbyHistory = async (userId, email, phone, excludeOrderId = null) => {
         const oCurrency = o.currency || "AED";
         const oDecimals = ["KWD", "BHD", "OMR"].includes(oCurrency.toUpperCase()) ? 3 : 2;
 
-        let tabbyStatus = "new";
         const ps = (o.paymentStatus || "").toLowerCase();
         const os = (o.orderStatus || "").toLowerCase();
 
-        // Status mapping: Comprehensive support for all system statuses (Tabby standard)
-        if (ps === "paid" || ps === "authorized" || ps === "closed" || os === "completed") {
-          tabbyStatus = "paid";
-        } else if (ps === "refunded") {
+        // 1️⃣ Map statuses to Tabby allowed values: new, processing, complete, refunded, canceled, unknown
+        let tabbyStatus = "unknown";
+
+        // Mapping system statuses (paymentStatus & orderStatus) to Tabby's required statuses
+        if (ps === "refunded") {
           tabbyStatus = "refunded";
-        } else if (os === "cancelled" || ps === "cancelled" || ps === "canceled") {
-          tabbyStatus = "cancelled";
-        } else if (ps === "failed" || ps === "rejected" || ps === "expired") {
-          tabbyStatus = "failed";
-        } else {
+        } else if (os === "cancelled" || ps === "failed" || ps === "canceled" || ps === "rejected" || ps === "expired") {
+          tabbyStatus = "canceled";
+        } else if (os === "completed" || ps === "paid" || ps === "closed") {
+          tabbyStatus = "complete";
+        } else if (os === "processing" || ps === "authorized") {
+          tabbyStatus = "processing";
+        } else if (os === "pending" || ps === "pending") {
           tabbyStatus = "new";
+        } else {
+          tabbyStatus = "unknown";
         }
+
+        const s = o.shippingAddress || {};
 
         return {
           purchased_at: o.createdAt ? o.createdAt.toISOString() : new Date().toISOString(),
           amount: parseFloat(o.total || 0).toFixed(oDecimals),
           payment_method:
-            o.paymentMethod === "stripe"
+            ["stripe", "tabby", "tamara", "card"].includes((o.paymentMethod || "").toLowerCase())
               ? "card"
-              : ["tabby", "tamara"].includes(o.paymentMethod)
-                ? "installments"
-                : "other",
-          status: tabbyStatus
+              : "cod",
+          status: tabbyStatus,
+          // 2️⃣ Add buyer inside each order_history item
+          buyer: {
+            id: consistentBuyerId,
+            name: `${s.firstName || "Customer"} ${s.lastName || "User"}`.trim(),
+            email: s.email || "guest@montres.ae",
+            phone: formatPhone(s.phone, normalizeCountry(s.country)),
+            // dob: "" // Format: YYYY-MM-DD (Optional, not currently in DB)
+          },
+          // 3️⃣ Add shipping_address inside each order_history item
+          shipping_address: {
+            city: s.city || "Dubai",
+            address: s.street || s.address1 || "N/A",
+            zip: s.postalCode || s.zip || "00000",
+            country: normalizeCountry(s.country)
+          }
         };
       });
     }
@@ -288,7 +326,7 @@ const getTabbyHistory = async (userId, email, phone, excludeOrderId = null) => {
   // Tabby will receive null or the current timestamp if the first order was just created.
   // This satisfies "real stored database value" and "not generated dynamically".
 
-  return { buyerHistory, orderHistory };
+  return { buyerHistory, orderHistory, consistentBuyerId };
 };
 
 
@@ -352,14 +390,7 @@ const preScoring = async (req, res) => {
     const buyerEmail = buyer?.email || req.user?.email || shipping_address?.email;
     const buyerPhone = buyer?.phone || req.user?.phone || shipping_address?.phone;
 
-    const { buyerHistory, orderHistory } = await getTabbyHistory(userId, buyerEmail, buyerPhone);
-
-    let persistentBuyerId = userId;
-    if (!persistentBuyerId && buyerEmail) {
-      persistentBuyerId = "guest_" + crypto.createHash("md5").update(buyerEmail.toLowerCase()).digest("hex").substring(0, 12);
-    } else if (!persistentBuyerId) {
-      persistentBuyerId = buyer?.id || (buyer?.phone ? "guest_" + buyer.phone.replace(/\D/g, "") : "guest_" + Date.now());
-    }
+    const { buyerHistory, orderHistory, consistentBuyerId } = await getTabbyHistory(userId, buyerEmail, buyerPhone);
 
     const decimals = ["KWD", "BHD", "OMR"].includes(currency.toUpperCase()) ? 3 : 2;
     const tabbyPayload = {
@@ -367,10 +398,10 @@ const preScoring = async (req, res) => {
         amount: String(Number(amount).toFixed(decimals)),
         currency: currency,
         buyer: {
+          name: buyer?.name || req.user?.name || `${shipping_address?.firstName || "Customer"} ${shipping_address?.lastName || "User"}`.trim(),
           email: buyerEmail,
-          name: buyer?.name,
           phone: formatPhone(buyerPhone, normalizeCountry(shipping_address?.country)),
-          id: persistentBuyerId,
+          id: consistentBuyerId,
         },
         shipping_address: shipping_address || {
           city: "Dubai",
@@ -448,8 +479,43 @@ const preScoring = async (req, res) => {
     console.log(`       installments: ${response.data?.configuration?.available_products?.installments?.length ?? 0}`);
     console.log("══════════════════════════════════════════════════\n");
 
+    // ✅ [8] Extract the true rejection reason
+    const installments = response.data.configuration?.available_products?.installments?.[0];
+    const rawReason = response.data.rejection_reason_code
+      || response.data.rejection_reason
+      || installments?.rejection_reason
+      || response.data.reason
+      || (response.data.status === "rejected" ? "rejected" : null);
+
     const eligible = ["approved", "approved_with_changes", "created"].includes(response.data.status?.toLowerCase()) ||
-      (response.data.configuration?.available_products?.installments?.length > 0);
+      (installments?.is_available !== false && response.data.configuration?.available_products?.installments?.length > 0);
+
+    let rejectionMessage = null;
+    const lang = req.body.lang || "en";
+    const isAr = lang.toLowerCase() === "ar";
+
+    if (!eligible && rawReason) {
+      if (rawReason === "order_amount_too_high" || rawReason === "order_limit_reached" || rawReason === "limit_exceeded" || rawReason === "monthly_limit_exceeded") {
+        rejectionMessage = isAr
+          ? "قيمة الطلب تفوق الحد الأقصى المسموح به حاليًا مع تابي. يُرجى تخفيض قيمة السلة أو استخدام وسيلة دفع أخرى."
+          : "This purchase is above your current spending limit with Tabby, try a smaller cart or use another payment method";
+      }
+      else if (rawReason === "order_amount_too_low") {
+        rejectionMessage = isAr
+          ? "قيمة الطلب أقل من الحد الأدنى المطلوب لاستخدام خدمة تابي. يُرجى زيادة قيمة الطلب أو استخدام وسيلة دفع أخرى."
+          : "Order value is less than the minimum required for Tabby service. Please increase the order value or use an alternative payment method.";
+      }
+      else if (rawReason === "not_available") {
+        rejectionMessage = isAr
+          ? "نأسف، تابي غير قادرة على الموافقة على هذه العملية. الرجاء استخدام طريقة دفع أخرى."
+          : "Sorry, Tabby is unable to approve this purchase. Please use an alternative payment method for your order.";
+      }
+      else {
+        rejectionMessage = isAr
+          ? "خدمة تابي غير متوفرة حالياً. يرجى استخدام طريقة دفع بديلة."
+          : "Tabby is currently unavailable. Please use an alternative payment method.";
+      }
+    }
 
     let rejectionMessage = null;
     if (!eligible && response.data.rejection_reason) {
@@ -463,7 +529,7 @@ const preScoring = async (req, res) => {
       success: true,
       eligible,
       status: response.data.status,
-      rejection_reason: response.data.rejection_reason,
+      rejection_reason: rawReason || "not_available",
       rejection_message: rejectionMessage,
       details: response.data
     });
@@ -588,9 +654,14 @@ const createTabbyOrder = async (req, res) => {
     const currency = req.body.currency || "AED";
     const decimals = ["KWD", "BHD", "OMR"].includes(currency.toUpperCase()) ? 3 : 2;
 
-    const subtotal = populatedItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
+    const subtotal = (populatedItems.reduce((acc, item) => acc + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0)) || 0;
     const { shippingFee, region } = shippingCalculator.calculateShippingFee({ country: shippingAddress?.country || "AE", subtotal });
-    const total = parseFloat((subtotal + shippingFee).toFixed(decimals));
+    const total = parseFloat((subtotal + shippingFee).toFixed(decimals)) || 0;
+
+    if (!total || total <= 0) {
+      console.warn("  [5] ❌ Total amount is zero or invalid — aborting");
+      return res.status(400).json({ success: false, message: "Invalid order amount. Please check your cart." });
+    }
 
     const referenceId = `tabby_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
 
@@ -634,23 +705,14 @@ const createTabbyOrder = async (req, res) => {
       : `${clientUrl}/checkout?failed=true&orderId=${referenceId}`;
 
     const userId = req.user?.userId;
-    const { buyerHistory, orderHistory } = await getTabbyHistory(userId, buyerEmail, buyerPhone, referenceId);
-
-    // Persistent guest ID logic: Use userId if present, otherwise MD5 of email
-    let persistentBuyerId = userId;
-    if (!persistentBuyerId && buyerEmail) {
-      persistentBuyerId = "guest_" + crypto.createHash("md5").update(buyerEmail.toLowerCase()).digest("hex").substring(0, 12);
-    } else if (!persistentBuyerId) {
-      // Last resort fallback
-      persistentBuyerId = "guest_" + (buyerPhone ? buyerPhone.replace(/\D/g, "") : Date.now());
-    }
+    const { buyerHistory, orderHistory, consistentBuyerId } = await getTabbyHistory(userId, buyerEmail, buyerPhone, referenceId);
 
     const tabbyItems = populatedItems.map((item) => ({
-      title: item.name,
-      description: item.name,
-      quantity: item.quantity,
-      unit_price: item.price.toFixed(decimals),
-      category: item.category || "Watch",
+      title: (item.name || "Watch Product").substring(0, 100).trim(), // Tabby often has 100 char limit
+      description: (item.name || "Watch Product").substring(0, 200).trim(),
+      quantity: item.quantity || 1,
+      unit_price: Number(item.price || 0).toFixed(decimals),
+      category: (item.category || "Watch").trim(),
       image_url: item.image || "https://www.montres.ae/logo.png",
       product_url: item.productId ? `${clientUrl}/product/${item.productId}` : clientUrl,
       brand: "Montres",
@@ -667,10 +729,10 @@ const createTabbyOrder = async (req, res) => {
         currency: currency,
         description: isAr ? "ادفع لاحقًا عبر تابي" : "Order via Tabby",
         buyer: {
-          id: persistentBuyerId,
-          email: buyerEmail,
           name: buyerName,
-          phone: formatPhone(buyerPhone, normalizeCountry(shippingAddress?.country))
+          email: buyerEmail,
+          phone: formatPhone(buyerPhone, normalizeCountry(shippingAddress?.country)),
+          id: consistentBuyerId
         },
         buyer_history: buyerHistory,
         shipping_address: {
@@ -696,6 +758,11 @@ const createTabbyOrder = async (req, res) => {
         failure: failureUrl
       }
     };
+
+    if (!tabbyPayload.payment.buyer.phone || tabbyPayload.payment.buyer.phone === "+") {
+      console.warn("  [5] ❌ Buyer phone is missing or invalid — using fallback to avoid 400");
+      tabbyPayload.payment.buyer.phone = "+971500000001";
+    }
 
     // ✅ [4] Check correct secret key
     const sk = process.env.TABBY_SECRET_KEY || "";
@@ -756,11 +823,43 @@ const createTabbyOrder = async (req, res) => {
       console.error("       Full response:", JSON.stringify(response.data, null, 2));
       console.log("══════════════════════════════════════════════════\n");
       await Order.findByIdAndDelete(newOrder._id);
+
+      const installments = response.data?.configuration?.available_products?.installments?.[0];
+      const rawReason = response.data?.rejection_reason_code
+        || response.data?.rejection_reason
+        || installments?.rejection_reason
+        || response.data?.reason
+        || "rejected";
+
+      let userMessage = "Tabby checkout unavailable";
+
+      const lang = req.body.lang || req.body.language || "en";
+      const isAr = lang.toLowerCase() === "ar" || lang.toLowerCase() === "arabic";
+
+      if (response.data.status === "rejected" || (installments && installments.is_available === false)) {
+        if (rawReason === "order_amount_too_high" || rawReason === "order_limit_reached" ||
+          rawReason === "limit_exceeded" || rawReason === "monthly_limit_exceeded" ||
+          rawReason === "order_too_high" || rawReason === "amount_too_high" ||
+          rawReason === "not_enough_limit") {
+          userMessage = isAr
+            ? "قيمة الطلب تفوق الحد الأقصى المسموح به حاليًا مع تابي. يُرجى تخفيض قيمة السلة أو استخدام وسيلة دفع أخرى."
+            : "This purchase is above your current spending limit with Tabby, try a smaller cart or use another payment method";
+        } else if (rawReason === "order_amount_too_low" || rawReason === "order_too_low") {
+          userMessage = isAr
+            ? "قيمة الطلب أقل من الحد الأدنى المطلوب لاستخدام خدمة تابي. يُرجى زيادة قيمة الطلب أو استخدام وسيلة دفع أخرى."
+            : "The purchase amount is below the minimum amount required to use Tabby, try adding more items or use another payment method";
+        } else if (rawReason === "not_available" || rawReason === "not_eligible" || rawReason === "customer_not_eligible") {
+          userMessage = isAr
+            ? "نأسف، تابي غير قادرة على الموافقة على هذه العملية. الرجاء استخدام طريقة دفع أخرى."
+            : "Sorry, Tabby is unable to approve this purchase. Please use an alternative payment method for your order.";
+        }
+      }
+
       return res.status(400).json({
         success: false,
-        message: response.data.status === "rejected" ? "Tabby has rejected this order" : "Tabby checkout unavailable",
+        message: userMessage,
         status: response.data.status,
-        rejection_reason: response.data?.rejection_reason,
+        rejection_reason: rawReason,
         debug: response.data
       });
     }
