@@ -1134,7 +1134,8 @@ const Fuse = require("fuse.js");
 
 const SEARCH_SELECT =
   "brand name regularPrice salePrice images category leatherMainCategory " +
-  "subcategory referenceNumber inStock stockQuantity model";
+  "subcategory referenceNumber inStock stockQuantity model " +
+  "accessoryCategory accessorySubCategory watchType watchStyle leatherSubCategory";
 
 const SEARCH_STOCK_FILTER = {
   published: true,

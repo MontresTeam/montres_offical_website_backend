@@ -101,7 +101,6 @@ const getProducts = async (req, res) => {
       itemCondition,
       scopeOfDelivery,
       badges,
-      search,
       minPrice,
       maxPrice,
       sortBy = "createdAt",
@@ -118,6 +117,8 @@ const getProducts = async (req, res) => {
       caseSize,
       strapSize,
       yearOfProduction,
+      minYear,
+      maxYear,
       waterResistance,
       movement,
       complications,
@@ -391,21 +392,30 @@ const getProducts = async (req, res) => {
     }
 
     // Year of Production Filter
-    const yearList = normalizeArray(yearOfProduction);
-    if (yearList.length > 0) {
-      const yearConditions = [];
-      yearList.forEach((range) => {
-        if (range === "pre_1950") {
-          yearConditions.push({ productionYear: { $lt: 1950 } });
-        } else {
-          const [min, max] = range.split("-").map(Number);
-          if (!isNaN(min) && !isNaN(max)) {
-            yearConditions.push({ productionYear: { $gte: min, $lte: max } });
+    if (minYear || maxYear) {
+      // Frontend sends minYear/maxYear directly
+      const yearFilter = {};
+      if (minYear) yearFilter.$gte = Number(minYear);
+      if (maxYear) yearFilter.$lte = Number(maxYear);
+      andConditions.push({ productionYear: yearFilter });
+    } else {
+      // Legacy range-string format (e.g. "1980-2000", "pre_1950")
+      const yearList = normalizeArray(yearOfProduction);
+      if (yearList.length > 0) {
+        const yearConditions = [];
+        yearList.forEach((range) => {
+          if (range === "pre_1950") {
+            yearConditions.push({ productionYear: { $lt: 1950 } });
+          } else {
+            const [min, max] = range.split("-").map(Number);
+            if (!isNaN(min) && !isNaN(max)) {
+              yearConditions.push({ productionYear: { $gte: min, $lte: max } });
+            }
           }
+        });
+        if (yearConditions.length > 0) {
+          andConditions.push({ $or: yearConditions });
         }
-      });
-      if (yearConditions.length > 0) {
-        andConditions.push({ $or: yearConditions });
       }
     }
 
@@ -458,20 +468,6 @@ const getProducts = async (req, res) => {
     // ✅ Leather Main Category Filter
     if (leatherMainCategory) {
       andConditions.push({ leatherMainCategory: { $regex: new RegExp(`^${leatherMainCategory}$`, "i") } });
-    }
-
-    // ✅ Search Filter
-    if (search && search.trim()) {
-      const searchRegex = new RegExp(search.trim(), "i");
-      andConditions.push({
-        $or: [
-          { name: searchRegex },
-          { brand: searchRegex },
-          { model: searchRegex },
-          { description: searchRegex },
-          { referenceNumber: searchRegex },
-        ],
-      });
     }
 
     // ✅ Merge all AND filters
@@ -1423,26 +1419,11 @@ const getRecommendations = async (cartItems, limit = 4) => {
 };
 
 const Fuse = require("fuse.js");
-
-const SEARCH_SELECT =
-  "brand name regularPrice salePrice images category leatherMainCategory " +
-  "subcategory referenceNumber inStock stockQuantity model";
+const { SEARCH_SELECT, FUSE_OPTIONS } = require("../utils/searchConstants");
 
 const SEARCH_STOCK_FILTER = {
   published: true,
   $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
-};
-
-const FUSE_OPTIONS = {
-  keys: [
-    { name: "brand", weight: 0.4 },
-    { name: "name", weight: 0.35 },
-    { name: "model", weight: 0.15 },
-    { name: "referenceNumber", weight: 0.1 },
-  ],
-  threshold: 0.35,
-  includeScore: true,
-  minMatchCharLength: 2,
 };
 
 const getAllProductwithSearch = async (req, res) => {
