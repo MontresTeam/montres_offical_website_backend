@@ -517,6 +517,14 @@ const preScoring = async (req, res) => {
       }
     }
 
+    let rejectionMessage = null;
+    if (!eligible && response.data.rejection_reason) {
+      const reason = response.data.rejection_reason;
+      if (reason === "order_amount_too_high") rejectionMessage = "This order amount exceeds the limit for Tabby.";
+      else if (reason === "order_amount_too_low") rejectionMessage = "This order amount is too low for Tabby.";
+      else rejectionMessage = "Tabby is currently unavailable for this order.";
+    }
+
     res.json({
       success: true,
       eligible,

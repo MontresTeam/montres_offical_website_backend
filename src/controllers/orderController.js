@@ -780,7 +780,6 @@ module.exports = {
   getBillingAddresses,
   createBillingAddress,
   deleteBillingAddress,
-  createTabbyOrder,
   createTamaraOrder,
   createStripeOrder,
   updateBillingAddress,

@@ -131,12 +131,10 @@ const getHomeProductsGrid = async (req, res) => {
           //    Extract a single image URL here so the full images array is never sent over the wire.
           {
             $project: {
+              brand: 1,
               name: 1,
               regularPrice: 1,
               salePrice: 1,
-              seoTitle: 1,
-              seoDescription: 1,
-              slug: 1,
               // keep fields the frontend needs for routing
               category: 1,
               leatherMainCategory: 1,
@@ -186,13 +184,11 @@ const getHomeProductsGrid = async (req, res) => {
               products: {
                 $push: {
                   _id: "$_id",
+                  brand: "$brand",
                   name: "$name",
                   regularPrice: "$regularPrice",
                   salePrice: "$salePrice",
                   image: "$image",
-                  seoTitle: "$seoTitle",
-                  seoDescription: "$seoDescription",
-                  slug: "$slug",
                   category: "$category",
                   leatherMainCategory: "$leatherMainCategory",
                   subCategory: "$subCategory",
@@ -221,13 +217,11 @@ const getHomeProductsGrid = async (req, res) => {
             subCategory,
             products: products.map((p) => ({
               _id: p._id,
+              brand: p.brand ?? null,
               name: p.name,
               regularPrice: p.regularPrice ?? 0,
               salePrice: p.salePrice ?? 0,
               image: p.image ?? null,
-              seoTitle: p.seoTitle ?? null,
-              seoDescription: p.seoDescription ?? null,
-              slug: p.slug ?? null,
               category: p.category ?? null,
               leatherMainCategory: p.leatherMainCategory ?? null,
               subCategory: p.subCategory ?? null,
@@ -409,20 +403,37 @@ const updateTrustedProducts = async (req, res) => {
   }
 };
 
+const PRODUCT_FIELDS = "brand name regularPrice salePrice images category leatherMainCategory subCategory";
+
+const toCardShape = (p) => ({
+  _id: p._id,
+  brand: p.brand ?? null,
+  name: p.name,
+  regularPrice: p.regularPrice ?? 0,
+  salePrice: p.salePrice ?? 0,
+  image: p.images?.[0]?.url ?? null,
+  category: p.category ?? null,
+  leatherMainCategory: p.leatherMainCategory ?? null,
+  subCategory: p.subCategory ?? null,
+});
+
 const getTrustedProduct = async (req, res) => {
   try {
     const homeProducts = await TrustedProducts.findOne()
-      .populate("newArrivals")
-      .populate("montresTrusted");
-    // console.log(homeProducts, "homeProducts");
+      .populate("newArrivals", PRODUCT_FIELDS)
+      .populate("montresTrusted", PRODUCT_FIELDS)
+      .lean();
 
     if (!homeProducts) {
-      return res.status(404).json({ message: "No home products found" }); //
+      return res.status(404).json({ message: "No home products found" });
     }
 
     res.status(200).json({
       message: "Home products fetched successfully",
-      data: homeProducts,
+      data: {
+        newArrivals: (homeProducts.newArrivals ?? []).map(toCardShape),
+        montresTrusted: (homeProducts.montresTrusted ?? []).map(toCardShape),
+      },
     });
   } catch (error) {
     console.error("Error fetching home products:", error);

@@ -101,7 +101,6 @@ const getProducts = async (req, res) => {
       itemCondition,
       scopeOfDelivery,
       badges,
-      search,
       minPrice,
       maxPrice,
       sortBy = "createdAt",
@@ -118,6 +117,8 @@ const getProducts = async (req, res) => {
       caseSize,
       strapSize,
       yearOfProduction,
+      minYear,
+      maxYear,
       waterResistance,
       movement,
       complications,
@@ -391,21 +392,30 @@ const getProducts = async (req, res) => {
     }
 
     // Year of Production Filter
-    const yearList = normalizeArray(yearOfProduction);
-    if (yearList.length > 0) {
-      const yearConditions = [];
-      yearList.forEach((range) => {
-        if (range === "pre_1950") {
-          yearConditions.push({ productionYear: { $lt: 1950 } });
-        } else {
-          const [min, max] = range.split("-").map(Number);
-          if (!isNaN(min) && !isNaN(max)) {
-            yearConditions.push({ productionYear: { $gte: min, $lte: max } });
+    if (minYear || maxYear) {
+      // Frontend sends minYear/maxYear directly
+      const yearFilter = {};
+      if (minYear) yearFilter.$gte = Number(minYear);
+      if (maxYear) yearFilter.$lte = Number(maxYear);
+      andConditions.push({ productionYear: yearFilter });
+    } else {
+      // Legacy range-string format (e.g. "1980-2000", "pre_1950")
+      const yearList = normalizeArray(yearOfProduction);
+      if (yearList.length > 0) {
+        const yearConditions = [];
+        yearList.forEach((range) => {
+          if (range === "pre_1950") {
+            yearConditions.push({ productionYear: { $lt: 1950 } });
+          } else {
+            const [min, max] = range.split("-").map(Number);
+            if (!isNaN(min) && !isNaN(max)) {
+              yearConditions.push({ productionYear: { $gte: min, $lte: max } });
+            }
           }
+        });
+        if (yearConditions.length > 0) {
+          andConditions.push({ $or: yearConditions });
         }
-      });
-      if (yearConditions.length > 0) {
-        andConditions.push({ $or: yearConditions });
       }
     }
 
@@ -460,20 +470,6 @@ const getProducts = async (req, res) => {
       andConditions.push({ leatherMainCategory: { $regex: new RegExp(`^${leatherMainCategory}$`, "i") } });
     }
 
-    // ✅ Search Filter
-    if (search && search.trim()) {
-      const searchRegex = new RegExp(search.trim(), "i");
-      andConditions.push({
-        $or: [
-          { name: searchRegex },
-          { brand: searchRegex },
-          { model: searchRegex },
-          { description: searchRegex },
-          { referenceNumber: searchRegex },
-        ],
-      });
-    }
-
     // ✅ Merge all AND filters
     if (andConditions.length > 0) {
       filterQuery.$and = andConditions;
@@ -514,11 +510,9 @@ const getProducts = async (req, res) => {
     // ✅ Query products
     const products = await Product.find(filterQuery)
       .select(
-        "brand model name sku referenceNumber serialNumber watchType watchStyle scopeOfDelivery scopeOfDeliveryWatch " +
-        "productionYear gender movement dialColor caseMaterial strapMaterial strapColor dialNumerals " +
-        "salePrice regularPrice stockQuantity taxStatus strapSize caseSize includedAccessories " +
-        "condition itemCondition category description visibility published featured inStock " +
-        "badges images createdAt updatedAt waterResistance complications crystal limitedEdition"
+        "brand name regularPrice salePrice stockQuantity inStock " +
+        "condition category leatherMainCategory subCategory " +
+        "images limitedEdition badges featured createdAt"
       )
       .sort(sortObj)
       .skip((pageNum - 1) * limitNum)
@@ -529,19 +523,23 @@ const getProducts = async (req, res) => {
 
     // ✅ Format response
     const formattedProducts = products.map((p) => ({
-      ...p,
+      _id: p._id,
       brand: p.brand || "",
-      category: p.category || "",
+      name: p.name,
+      regularPrice: p.regularPrice ?? 0,
+      salePrice: p.salePrice ?? 0,
       image:
         p.images?.find((img) => img.type === "main")?.url ||
         p.images?.[0]?.url ||
-        "",
-      available: p.stockQuantity > 0 || p.inStock,
-      discount:
-        p.regularPrice && p.salePrice && p.regularPrice > p.salePrice
-          ? Math.round(((p.regularPrice - p.salePrice) / p.regularPrice) * 100)
-          : 0,
-      isOnSale: p.regularPrice && p.salePrice && p.regularPrice > p.salePrice,
+        null,
+      category: p.category || "",
+      leatherMainCategory: p.leatherMainCategory || null,
+      subCategory: p.subCategory || null,
+      inStock: p.stockQuantity > 0 || p.inStock,
+      condition: p.condition || null,
+      limitedEdition: p.limitedEdition || false,
+      badges: p.badges || [],
+      featured: p.featured || false,
     }));
 
     res.json({
@@ -1420,63 +1418,54 @@ const getRecommendations = async (cartItems, limit = 4) => {
   }
 };
 
+const Fuse = require("fuse.js");
+const { SEARCH_SELECT, FUSE_OPTIONS } = require("../utils/searchConstants");
+
+const SEARCH_STOCK_FILTER = {
+  published: true,
+  $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
+};
+
 const getAllProductwithSearch = async (req, res) => {
   try {
     const { search = "" } = req.query;
-    let query = { published: true };
+    const trimmed = search.trim();
 
-    // ✅ Case-insensitive search by name or brand
-    if (search && search.trim()) {
-      const searchTerms = search.trim().split(/\s+/);
+    if (trimmed) {
+      // Primary: $text search — indexed, ranked by relevance score
+      const query = { ...SEARCH_STOCK_FILTER, $text: { $search: trimmed } };
+      const textResults = await Product.find(query, { score: { $meta: "textScore" } })
+        .select(SEARCH_SELECT)
+        .sort({ score: { $meta: "textScore" } })
+        .limit(20)
+        .lean();
 
-      // Helper to create loose regex for singular/plural matching
-      const createRegex = (term) => {
-        let cleanTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape regex chars
-        if (cleanTerm.length > 3) {
-          if (cleanTerm.toLowerCase().endsWith('ies')) cleanTerm = cleanTerm.slice(0, -3); // accessories -> accessor
-          else if (cleanTerm.toLowerCase().endsWith('es')) cleanTerm = cleanTerm.slice(0, -2); // watches -> watch
-          else if (cleanTerm.toLowerCase().endsWith('s') && !cleanTerm.toLowerCase().endsWith('ss')) cleanTerm = cleanTerm.slice(0, -1); // bags -> bag
-        }
-        return new RegExp(cleanTerm, "i");
-      };
+      if (textResults.length > 0) {
+        return res.json({ success: true, totalProducts: textResults.length, products: textResults });
+      }
 
-      query = {
-        published: true,
-        $and: searchTerms.map(term => {
-          const regex = createRegex(term);
-          return {
-            $or: [
-              { name: regex },
-              { brand: regex },
-              { model: regex },
-              { description: regex },
-              { referenceNumber: regex },
-              { category: regex },
-              { accessoryCategory: regex },
-              { accessorySubCategory: regex },
-              { leatherMainCategory: regex },
-              { leatherSubCategory: regex },
-              { watchType: regex },
-              { watchStyle: regex }
-            ]
-          };
-        }),
-      };
+      // Fallback: Fuse.js fuzzy search — handles typos like "rolexx" → "Rolex"
+      const catalog = await Product.find(SEARCH_STOCK_FILTER)
+        .select(SEARCH_SELECT)
+        .lean();
+      const fuse = new Fuse(catalog, FUSE_OPTIONS);
+      const fuzzyResults = fuse.search(trimmed).slice(0, 20).map((r) => r.item);
+
+      return res.json({ success: true, totalProducts: fuzzyResults.length, products: fuzzyResults });
     }
 
-    // ✅ Fetch all matching products
-    const products = await Product.find(query);
+    // No search term — return full catalog for client-side search (Navbar preload)
+    const products = await Product.find(SEARCH_STOCK_FILTER)
+      .select(SEARCH_SELECT)
+      .sort({ createdAt: -1 })
+      .lean();
 
-    return res.json({
-      success: true,
-      totalProducts: products.length,
-      products,
-    });
+    return res.json({ success: true, totalProducts: products.length, products });
   } catch (error) {
     console.error("Product fetch error: ", error);
     res.status(500).json({
       success: false,
-      message: "❌ Error fetching products",
+      message: "Error fetching products",
       error: error.message,
     });
   }
@@ -1556,12 +1545,24 @@ const YouMayAlsoLike = async (req, res) => {
 
 const getLimitedEditionProducts = async (req, res) => {
   try {
-    const products = await Product.find({
+    const raw = await Product.find({
       limitedEdition: true,
       published: true,
-    }).select(
-      "brand model name regularPrice salePrice images limitedEdition category inStock createdAt"
-    );
+    })
+      .select("brand name regularPrice salePrice images category leatherMainCategory subCategory")
+      .lean();
+
+    const products = raw.map((p) => ({
+      _id: p._id,
+      brand: p.brand ?? null,
+      name: p.name,
+      regularPrice: p.regularPrice ?? 0,
+      salePrice: p.salePrice ?? 0,
+      image: p.images?.[0]?.url ?? null,
+      category: p.category ?? null,
+      leatherMainCategory: p.leatherMainCategory ?? null,
+      subCategory: p.subCategory ?? null,
+    }));
 
     res.status(200).json({
       success: true,
