@@ -93,73 +93,75 @@ const updateHomeProducts = async (req, res) => {
 
 const getHomeProductsGrid = async (req, res) => {
   try {
-    // Define categories and their style fields
-    const categories = [
+    // ── Watches & Accessories: grouped by style (1 watch / 3 accessories per style)
+    const groupedCategories = [
       { title: "Watch", styleField: "watchStyle" },
       { title: "Accessories", styleField: "accessoryCategory" },
-      { title: "Leather Goods", styleField: "leatherMainCategory", excludeBags: true },
-      { title: "Leather Bags", styleField: "subcategory", includeBags: true },
     ];
 
-    const homeProducts = await Promise.all(
-      categories.map(async (cat) => {
-        // Build filter
-        let filter = {
+    // ── Leather: flat list using the `category` field (indexed, most reliable)
+    const leatherFilter = {
+      category: "Leather Goods",
+      inStock: true,
+      stockQuantity: { $gt: 0 },
+    };
+    const leatherBagsFilter = {
+      category: "Leather Bags",
+      inStock: true,
+      stockQuantity: { $gt: 0 },
+    };
+
+    const [leatherGoods, leatherBags, ...groupedResults] = await Promise.all([
+      Product.find(leatherFilter).sort({ createdAt: -1 }).limit(10),
+      Product.find(leatherBagsFilter).sort({ createdAt: -1 }).limit(10),
+      ...groupedCategories.map(async (cat) => {
+        const filter = {
           [cat.styleField]: { $exists: true, $ne: null },
           inStock: true,
-          stockQuantity: { $gt: 0 }
+          stockQuantity: { $gt: 0 },
         };
 
-        if (cat.title === "Leather Bags") {
-          // Only get bag products
-          filter[cat.styleField] = { $in: ["Shoulder Bag", "Tote Bag", "Crossbody Bag", "Travel Bag", "Hand Bag", "Business Bag"] };
-        }
-
-        if (cat.title === "Leather Goods") {
-          // Exclude bags
-          filter[cat.styleField] = { $nin: ["Hand Bag", "Tote Bag", "Crossbody Bag"] };
-        }
-
-        // Fetch products for this category
         const productsInCategory = await Product.find(filter).sort({ createdAt: -1 });
 
-        // Get unique style/subcategory values
         const styles = [
           ...new Set(productsInCategory.flatMap(p => p[cat.styleField]).filter(Boolean))
         ];
 
-        // Pick products per style
         const groupedProducts = styles.map(style => {
-          let matchedProducts = productsInCategory.filter(p => {
+          const matched = productsInCategory.filter(p => {
             const val = p[cat.styleField];
             return Array.isArray(val) ? val.includes(style) : val === style;
           });
-
-          // Logic: Watches = 1 product per style, Accessories = up to 3 products, Leather = 1 per style
-          let productsToReturn = [];
-          if (cat.title === "Watch" || cat.title.includes("Leather")) {
-            productsToReturn = matchedProducts.slice(0, 1);
-          } else if (cat.title === "Accessories") {
-            productsToReturn = matchedProducts.slice(0, 3);
-          }
-
           return {
             subCategory: style,
-            products: productsToReturn
+            products: cat.title === "Watch" ? matched.slice(0, 1) : matched.slice(0, 3),
           };
         });
 
-        return {
-          category: cat.title,
-          groupedProducts
-        };
-      })
-    );
+        return { category: cat.title, groupedProducts };
+      }),
+    ]);
+
+    // Wrap leather flat lists into the same grouped shape the frontend expects
+    const leatherGoodsEntry = {
+      category: "Leather Goods",
+      groupedProducts: [{ subCategory: "All", products: leatherGoods }],
+    };
+    const leatherBagsEntry = {
+      category: "Leather Bags",
+      groupedProducts: [{ subCategory: "All", products: leatherBags }],
+    };
+
+    const homeProducts = [
+      ...groupedResults,
+      ...(leatherGoods.length ? [leatherGoodsEntry] : []),
+      ...(leatherBags.length ? [leatherBagsEntry] : []),
+    ];
 
     res.status(200).json({
       success: true,
       category: homeProducts.length,
-      homeProducts
+      homeProducts,
     });
 
   } catch (error) {
@@ -333,11 +335,11 @@ const getTrustedProduct = async (req, res) => {
     const homeProducts = await TrustedProducts.findOne()
       .populate({
         path: "newArrivals",
-        match: { $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }] }
+        match: { inStock: true, stockQuantity: { $gt: 0 } }
       })
       .populate({
         path: "montresTrusted",
-        match: { $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }] }
+        match: { inStock: true, stockQuantity: { $gt: 0 } }
       });
 
     if (homeProducts) {

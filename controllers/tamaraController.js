@@ -78,7 +78,7 @@ const createTamaraOrder = async (req, res) => {
         const populatedItems = await Promise.all(
             items.map(async (it) => {
                 const product = await Product.findById(it.productId)
-                    .select("name images salePrice regularPrice stockQuantity published")
+                    .select("name images salePrice regularPrice stockQuantity published sku")
                     .lean();
 
                 if (!product) throw new Error("Product not found");
@@ -92,6 +92,7 @@ const createTamaraOrder = async (req, res) => {
                     image: product.images?.[0]?.url || "",
                     price: Number(price),
                     quantity: Number(it.quantity) || 1,
+                    sku: product.sku || product._id.toString(),
                 };
             })
         );

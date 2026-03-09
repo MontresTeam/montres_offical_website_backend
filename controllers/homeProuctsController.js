@@ -93,149 +93,138 @@ const updateHomeProducts = async (req, res) => {
 
 const getHomeProductsGrid = async (req, res) => {
   try {
-    const CATEGORIES = [
-      { title: "Watch",        styleField: "watchStyle",        limit: 1 },
-      { title: "Accessories",  styleField: "accessoryCategory", limit: 3 },
+    const BASE_MATCH = { inStock: true, stockQuantity: { $gt: 0 } };
+
+    // ── Watches & Accessories: aggregation pipeline grouped by style
+    const GROUPED_CATEGORIES = [
+      { title: "Watch", styleField: "watchStyle", limit: 1 },
+      { title: "Accessories", styleField: "accessoryCategory", limit: 3 },
+    ];
+
+    const buildPipeline = (styleField, styleMatch, limit) => [
+      { $match: { ...BASE_MATCH, [styleField]: styleMatch } },
+      { $sort: { createdAt: -1 } },
       {
-        title: "Leather Goods",
-        styleField: "leatherMainCategory",
-        limit: 1,
-        valueFilter: { $nin: ["Hand Bag", "Tote Bag", "Crossbody Bag"] },
+        $project: {
+          name: 1, brand: 1, regularPrice: 1, salePrice: 1,
+          seoTitle: 1, seoDescription: 1, slug: 1,
+          category: 1, leatherMainCategory: 1, subCategory: 1,
+          _styleValue: `$${styleField}`,
+          image: {
+            $let: {
+              vars: {
+                mainImg: {
+                  $arrayElemAt: [
+                    { $filter: { input: { $ifNull: ["$images", []] }, as: "i", cond: { $eq: ["$$i.type", "main"] } } },
+                    0,
+                  ],
+                },
+                firstImg: { $arrayElemAt: [{ $ifNull: ["$images", []] }, 0] },
+              },
+              in: { $ifNull: ["$$mainImg.url", "$$firstImg.url"] },
+            },
+          },
+        },
       },
       {
-        title: "Leather Bags",
-        styleField: "subcategory",
-        limit: 1,
-        valueFilter: { $in: ["Shoulder Bag", "Tote Bag", "Crossbody Bag"] },
+        $addFields: {
+          _styleValues: {
+            $cond: { if: { $isArray: "$_styleValue" }, then: "$_styleValue", else: ["$_styleValue"] },
+          },
+        },
+      },
+      { $unwind: "$_styleValues" },
+      { $match: { _styleValues: { $nin: [null, ""] } } },
+      {
+        $group: {
+          _id: "$_styleValues",
+          products: {
+            $push: {
+              _id: "$_id", name: "$name", brand: "$brand",
+              regularPrice: "$regularPrice", salePrice: "$salePrice",
+              image: "$image", seoTitle: "$seoTitle", seoDescription: "$seoDescription",
+              slug: "$slug", category: "$category",
+              leatherMainCategory: "$leatherMainCategory", subCategory: "$subCategory",
+            },
+          },
+        },
+      },
+      { $project: { _id: 0, subCategory: "$_id", products: { $slice: ["$products", limit] } } },
+      { $sort: { subCategory: 1 } },
+    ];
+
+    // ── Leather: flat query by `category` field — NOT grouped by style
+    //    Grouping by style was capping total at (styles × 1) = 3 max.
+    //    Flat query returns up to 10, frontend shows 5 per page.
+    const flatLeatherPipeline = (categoryValue) => [
+      { $match: { ...BASE_MATCH, category: categoryValue } },
+      { $sort: { createdAt: -1 } },
+      { $limit: 10 },
+      {
+        $project: {
+          name: 1, brand: 1, regularPrice: 1, salePrice: 1,
+          seoTitle: 1, seoDescription: 1, slug: 1,
+          category: 1, leatherMainCategory: 1, subCategory: 1,
+          image: {
+            $let: {
+              vars: {
+                mainImg: {
+                  $arrayElemAt: [
+                    { $filter: { input: { $ifNull: ["$images", []] }, as: "i", cond: { $eq: ["$$i.type", "main"] } } },
+                    0,
+                  ],
+                },
+                firstImg: { $arrayElemAt: [{ $ifNull: ["$images", []] }, 0] },
+              },
+              in: { $ifNull: ["$$mainImg.url", "$$firstImg.url"] },
+            },
+          },
+        },
       },
     ];
 
-    // published: true filter — only add if products actually have this field set
-    const BASE_MATCH = { inStock: true, stockQuantity: { $gt: 0 } };
+    const mapProduct = (p) => ({
+      _id: p._id,
+      name: p.name,
+      brand: p.brand ?? null,
+      regularPrice: p.regularPrice ?? 0,
+      salePrice: p.salePrice ?? 0,
+      image: p.image ?? null,
+      seoTitle: p.seoTitle ?? null,
+      seoDescription: p.seoDescription ?? null,
+      slug: p.slug ?? null,
+      category: p.category ?? null,
+      leatherMainCategory: p.leatherMainCategory ?? null,
+      subCategory: p.subCategory ?? null,
+    });
 
-    const homeProducts = await Promise.all(
-      CATEGORIES.map(async ({ title, styleField, limit, valueFilter }) => {
-        const styleMatch = valueFilter ?? { $exists: true, $ne: null };
+    const [leatherGoodsProducts, leatherBagsProducts, ...groupedResults] = await Promise.all([
+      Product.aggregate(flatLeatherPipeline("Leather Goods")),
+      Product.aggregate(flatLeatherPipeline("Leather Bags")),
+      ...GROUPED_CATEGORIES.map(({ styleField, limit }) =>
+        Product.aggregate(buildPipeline(styleField, { $exists: true, $ne: null }, limit))
+      ),
+    ]);
 
-        const pipeline = [
-          // 1. Filter at DB level — uses indexes
-          { $match: { ...BASE_MATCH, [styleField]: styleMatch } },
-
-          // 2. Sort before grouping so newest products end up first in each group
-          { $sort: { createdAt: -1 } },
-
-          // 3. Project only needed fields.
-          //    NOTE: displayPrice is a Mongoose virtual — it does NOT exist in raw MongoDB
-          //    documents. Aggregation pipelines bypass Mongoose virtuals entirely.
-          //    Use regularPrice and salePrice (the actual stored fields) instead.
-          //    Extract a single image URL here so the full images array is never sent over the wire.
-          {
-            $project: {
-              name: 1,
-              regularPrice: 1,
-              salePrice: 1,
-              seoTitle: 1,
-              seoDescription: 1,
-              slug: 1,
-              // keep fields the frontend needs for routing
-              category: 1,
-              leatherMainCategory: 1,
-              subCategory: 1,
-              _styleValue: `$${styleField}`,
-              // Resolve single image URL in MongoDB — prefer type:"main", fall back to first
-              image: {
-                $let: {
-                  vars: {
-                    mainImg: {
-                      $arrayElemAt: [
-                        { $filter: { input: { $ifNull: ["$images", []] }, as: "i", cond: { $eq: ["$$i.type", "main"] } } },
-                        0,
-                      ],
-                    },
-                    firstImg: { $arrayElemAt: [{ $ifNull: ["$images", []] }, 0] },
-                  },
-                  in: { $ifNull: ["$$mainImg.url", "$$firstImg.url"] },
-                },
-              },
-            },
-          },
-
-          // 4. Normalize style field to array so $unwind works for both string & array fields
-          {
-            $addFields: {
-              _styleValues: {
-                $cond: {
-                  if: { $isArray: "$_styleValue" },
-                  then: "$_styleValue",
-                  else: ["$_styleValue"],
-                },
-              },
-            },
-          },
-
-          // 5. Expand — one document per style value
-          { $unwind: "$_styleValues" },
-
-          // 6. Drop nulls/empty strings that may appear after unwind
-          { $match: { _styleValues: { $nin: [null, ""] } } },
-
-          // 7. Group by style — MongoDB does the grouping, not Node.js
-          {
-            $group: {
-              _id: "$_styleValues",
-              products: {
-                $push: {
-                  _id: "$_id",
-                  name: "$name",
-                  regularPrice: "$regularPrice",
-                  salePrice: "$salePrice",
-                  image: "$image",
-                  seoTitle: "$seoTitle",
-                  seoDescription: "$seoDescription",
-                  slug: "$slug",
-                  category: "$category",
-                  leatherMainCategory: "$leatherMainCategory",
-                  subCategory: "$subCategory",
-                },
-              },
-            },
-          },
-
-          // 8. Slice products per group at DB level — no JS slicing needed
-          {
-            $project: {
-              _id: 0,
-              subCategory: "$_id",
-              products: { $slice: ["$products", limit] },
-            },
-          },
-
-          { $sort: { subCategory: 1 } },
-        ];
-
-        const grouped = await Product.aggregate(pipeline);
-
-        return {
-          category: title,
-          groupedProducts: grouped.map(({ subCategory, products }) => ({
-            subCategory,
-            products: products.map((p) => ({
-              _id: p._id,
-              name: p.name,
-              regularPrice: p.regularPrice ?? 0,
-              salePrice: p.salePrice ?? 0,
-              image: p.image ?? null,
-              seoTitle: p.seoTitle ?? null,
-              seoDescription: p.seoDescription ?? null,
-              slug: p.slug ?? null,
-              category: p.category ?? null,
-              leatherMainCategory: p.leatherMainCategory ?? null,
-              subCategory: p.subCategory ?? null,
-            })),
-          })),
-        };
-      })
-    );
+    const homeProducts = [
+      // Grouped categories (Watch, Accessories)
+      ...GROUPED_CATEGORIES.map(({ title }, i) => ({
+        category: title,
+        groupedProducts: groupedResults[i].map(({ subCategory, products }) => ({
+          subCategory,
+          products: products.map(mapProduct),
+        })),
+      })),
+      // Leather flat lists — wrapped as single "All" group so frontend flatMap works
+      ...(leatherGoodsProducts.length ? [{
+        category: "Leather Goods",
+        groupedProducts: [{ subCategory: "All", products: leatherGoodsProducts.map(mapProduct) }],
+      }] : []),
+      ...(leatherBagsProducts.length ? [{
+        category: "Leather Bags",
+        groupedProducts: [{ subCategory: "All", products: leatherBagsProducts.map(mapProduct) }],
+      }] : []),
+    ];
 
     res.status(200).json({
       success: true,
@@ -248,9 +237,6 @@ const getHomeProductsGrid = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
-
-
 
 
 const getBrandNewProducts = async (req, res) => {

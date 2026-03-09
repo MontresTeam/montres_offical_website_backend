@@ -24,7 +24,7 @@ const createStripeOrder = async (req, res) => {
 
     const populatedItems = await Promise.all(
       items.map(async (it) => {
-        const product = await Product.findById(it.productId).select("name images salePrice").lean();
+        const product = await Product.findById(it.productId).select("name images salePrice sku").lean();
         if (!product) throw new Error(`Product not found: ${it.productId}`);
         return {
           productId: product._id,
@@ -32,6 +32,7 @@ const createStripeOrder = async (req, res) => {
           image: product.images?.[0]?.url || "",
           price: product.salePrice || 0,
           quantity: it.quantity || 1,
+          sku: product.sku || "",
         };
       })
     );

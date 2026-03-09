@@ -16,6 +16,10 @@ router.post("/submit", imageUpload, submitContactForm);
 // 📜 Get all contact submissions - Admin only
 router.get("/", adminProtect, getAllContacts);
 
+const { getContactById } = require("../controllers/contactFormController");
+// 📜 Get single contact submission - Admin only
+router.get("/:id", adminProtect, getContactById);
+
 // 🗑 Delete contact - Admin only
 router.delete("/:id", adminProtect, deleteContact);
 

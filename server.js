@@ -29,6 +29,12 @@ const purchaseRoutes = require('./routes/purchaseRoutes');
 const newsletterRoutes = require('./routes/newsletterRoutes');
 const offerRoutes = require('./routes/offerRoutes');
 const blogRoutes = require('./routes/blogRoutes');
+const chatRoutes = require("./routes/chatRoutes");
+const pushRoutes = require("./routes/pushRoutes");
+
+const http = require('http');
+const { Server } = require('socket.io');
+const socketHandler = require('./socket/socketHandler');
 
 
 
@@ -119,6 +125,8 @@ app.use("/api/purchase", purchaseRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/offers", offerRoutes);
 app.use("/api/blogs", blogRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/push", pushRoutes);
 
 
 // ✅ Catch-all generic /api route MUST be last
@@ -132,5 +140,17 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: "Internal Server Error" });
 });
 
-// ✅ Start Server
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// ✅ Start Server with Socket.io
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
+app.set('socketio', io);
+socketHandler(io);
+
+server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

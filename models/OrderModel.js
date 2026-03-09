@@ -8,7 +8,9 @@ const orderItemSchema = new mongoose.Schema(
     },
     name: String,
     price: Number,
-    quantity: Number
+    quantity: Number,
+    sku: String,
+    image: String
   },
   { _id: false }
 );
@@ -23,6 +25,8 @@ const addressSnapshotSchema = new mongoose.Schema(
     country: String,
     state: String,
     city: String,
+    address1: String,
+    address2: String,
     street: String,
     postalCode: String
   },

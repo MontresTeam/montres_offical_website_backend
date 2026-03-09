@@ -138,3 +138,28 @@ exports.deleteContact = async (req, res) => {
     });
   }
 };
+// 📜 Get single contact submission
+exports.getContactById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const contact = await ContactForm.findById(id);
+
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        message: "Contact not found.",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: contact,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching contact submission.",
+      error: error.message,
+    });
+  }
+};
