@@ -1,5 +1,6 @@
 const User = require("../models/UserModel");
 const Customer = require("../models/customersModal");
+const mongoose = require("mongoose");
 
 // Create a new user (Save manual entries to Customer model to match previous behavior)
 const createCustomer = async (req, res) => {
@@ -91,10 +92,15 @@ const getAllCustomers = async (req, res) => {
 const getCustomerById = async (req, res) => {
   try {
     const { id } = req.params;
-    let data = await User.findById(id);
+
+    let data = null;
     let source = "website";
 
-    if (!data) {
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      data = await User.findById(id);
+    }
+
+    if (!data && mongoose.Types.ObjectId.isValid(id)) {
       data = await Customer.findById(id);
       source = "manual";
     }
@@ -128,13 +134,16 @@ const updateCustomer = async (req, res) => {
     const { id } = req.params;
     const { username, email, designation, status } = req.body;
 
-    let customer = await User.findByIdAndUpdate(
-      id,
-      { name: username, email },
-      { new: true, runValidators: true }
-    );
+    let customer = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      customer = await User.findByIdAndUpdate(
+        id,
+        { name: username, email },
+        { new: true, runValidators: true }
+      );
+    }
 
-    if (!customer) {
+    if (!customer && mongoose.Types.ObjectId.isValid(id)) {
       customer = await Customer.findByIdAndUpdate(
         id,
         { username, email, designation, status },
@@ -159,9 +168,13 @@ const updateCustomer = async (req, res) => {
 const deleteCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    let customer = await User.findByIdAndDelete(id);
+    let customer = null;
 
-    if (!customer) {
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      customer = await User.findByIdAndDelete(id);
+    }
+
+    if (!customer && mongoose.Types.ObjectId.isValid(id)) {
       customer = await Customer.findByIdAndDelete(id);
     }
 

@@ -63,7 +63,15 @@ const buildWatchFilter = (query) => {
   Object.entries(simpleFilters).forEach(([key, value]) => {
     const list = normalizeArray(value);
     if (list.length > 0) {
-      andConditions.push({ [key]: { $in: list.map(v => new RegExp(`^${v}$`, 'i')) } });
+      if (key === 'watchStyle') {
+        // For watchStyle, allow partial matches (e.g., "Luxury" matches "luxury watch")
+        const styleConditions = list.map(v => ({
+          [key]: new RegExp(`^${v}( watch)?$`, 'i')
+        }));
+        andConditions.push({ $or: styleConditions });
+      } else {
+        andConditions.push({ [key]: { $in: list.map(v => new RegExp(`^${v}$`, 'i')) } });
+      }
     }
   });
 
@@ -220,7 +228,8 @@ const getWatchesByStyle = async (req, res) => {
     let filter = { category: "Watch", published: true };
 
     if (style && style !== "all") {
-      filter.watchStyle = style;
+      // Use case-insensitive regex and allow optional " watch" suffix
+      filter.watchStyle = new RegExp(`^${style}( watch)?$`, "i");
     }
 
     const andConditions = buildWatchFilter(req.query);

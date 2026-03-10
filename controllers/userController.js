@@ -1,6 +1,7 @@
 require("dotenv").config(); // <--- MUST be at the top, before using process.env
 const userModel = require("../models/UserModel");
 const ProductModel = require("../models/product");
+const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const axios = require("axios");
@@ -356,6 +357,13 @@ const ResetPassword = async (req, res) => {
       return res
         .status(400)
         .json({ status: "Fail", message: "Passwords do not match" });
+    }
+
+    // ✅ Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res
+        .status(400)
+        .json({ status: "Fail", message: "Invalid user ID" });
     }
 
     // ✅ Find user by ID

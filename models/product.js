@@ -737,7 +737,7 @@ productSchema.virtual("originalPrice").get(function () {
 // ==================== MIDDLEWARE ====================
 
 // Pre-save middleware
-productSchema.pre("save", function (next) {
+productSchema.pre("save", async function () {
   // Generate name if not provided
   if (!this.name) {
     const nameParts = [];
@@ -768,8 +768,6 @@ productSchema.pre("save", function (next) {
       this.color = this.dialColor;
     }
   }
-
-  next();
 });
 
 // ==================== STATIC METHODS ====================

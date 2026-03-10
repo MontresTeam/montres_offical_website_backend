@@ -3,6 +3,7 @@ const User = require('../models/UserModel');
 const ChatStatus = require('../models/ChatStatus');
 const CustomerStatus = require('../models/CustomerStatus');
 const pushController = require('../controllers/pushController');
+const mongoose = require('mongoose');
 
 const ADMIN_ROOM = "admin_room";
 // Track online users: userId -> Set of socketIds (to handle multiple tabs)
@@ -32,8 +33,8 @@ const socketHandler = (io) => {
             let userName = null;
             let userEmail = null;
 
-            // Fetch real user info if not a guest
-            if (userId && !userId.startsWith('guest_')) {
+            // Fetch real user info if not a guest or anonymous user ID
+            if (userId && !userId.startsWith('guest_') && !userId.startsWith('user_') && mongoose.Types.ObjectId.isValid(userId)) {
                 try {
                     const user = await User.findById(userId).select('name email');
                     if (user) {
@@ -116,11 +117,13 @@ const socketHandler = (io) => {
                     try {
                         let customerName = "Customer";
                         // Find user details for the name
-                        if (senderId && !senderId.startsWith('guest_')) {
+                        if (senderId && !senderId.startsWith('guest_') && !senderId.startsWith('user_') && mongoose.Types.ObjectId.isValid(senderId)) {
                             const user = await User.findById(senderId).select('name');
                             if (user) customerName = user.name;
-                        } else if (senderId && senderId.startsWith('guest_')) {
-                            customerName = `Guest ${senderId.substring(6, 11)}`;
+                        } else if (senderId && (senderId.startsWith('guest_') || senderId.startsWith('user_'))) {
+                            const prefix = senderId.startsWith('guest_') ? 'Guest' : 'User';
+                            const offset = senderId.startsWith('guest_') ? 6 : 5;
+                            customerName = `${prefix} ${senderId.substring(offset, offset + 5)}`;
                         }
 
                         // Get unread count for admin
@@ -247,7 +250,7 @@ const socketHandler = (io) => {
                             const lastSeenDate = new Date();
 
                             // Update lastSeen in DB
-                            if (currentUserId && !currentUserId.startsWith('guest_')) {
+                            if (currentUserId && !currentUserId.startsWith('guest_') && !currentUserId.startsWith('user_') && mongoose.Types.ObjectId.isValid(currentUserId)) {
                                 try {
                                     await User.findByIdAndUpdate(currentUserId, { lastSeen: lastSeenDate });
                                 } catch (e) { }

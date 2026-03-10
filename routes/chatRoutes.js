@@ -93,7 +93,64 @@ router.post('/offline-message', async (req, res) => {
     }
 });
 
-// Get chat history between two users
+// ─────────────────────────────────────────────────────────────────────────────
+// FAQ BOT ROUTES  (MUST be defined BEFORE the generic /:userId/:otherId route)
+// ─────────────────────────────────────────────────────────────────────────────
+const FaqBot = require('../models/FaqBot');
+
+// Get all FAQs (Admin)
+router.get('/faq/all', async (req, res) => {
+    try {
+        const faqs = await FaqBot.find().sort({ trigger: 1 });
+        res.json(faqs);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// Get FAQ response by trigger (Chatbot)  
+// NOTE: Keep this above /:userId/:otherId or Express will match faq/trigger as userId/otherId
+router.get('/faq/:trigger', async (req, res) => {
+    try {
+        const faq = await FaqBot.findOne({ trigger: req.params.trigger });
+        if (!faq) {
+            return res.status(404).json({ message: 'No response found for this trigger' });
+        }
+        res.json(faq);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// Upsert FAQ (Admin)
+router.post('/faq', async (req, res) => {
+    try {
+        const { trigger, response, options, category } = req.body;
+        const faq = await FaqBot.findOneAndUpdate(
+            { trigger },
+            { response, options, category },
+            { new: true, upsert: true }
+        );
+        res.status(201).json(faq);
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+});
+
+// Delete FAQ (Admin)
+router.delete('/faq/:id', async (req, res) => {
+    try {
+        await FaqBot.findByIdAndDelete(req.params.id);
+        res.json({ message: 'FAQ deleted successfully' });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHAT HISTORY & CONVERSATION ROUTES  (generic wildcards come AFTER specifics)
+// ─────────────────────────────────────────────────────────────────────────────
+
 router.get('/:userId/:otherId', async (req, res) => {
     try {
         const { userId, otherId } = req.params;
