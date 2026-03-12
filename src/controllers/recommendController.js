@@ -2,16 +2,30 @@
 const Product = require('../models/product');
 const UserActivity = require('../models/UserActivity');
 
-/**
- * Utility: merge and dedupe product arrays and preserve order
- */
+const CARD_SELECT = "brand name regularPrice salePrice images category leatherMainCategory subcategory";
+const STOCK_FILTER = { published: true, $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }] };
+
+const toCard = (p) => ({
+  _id: p._id,
+  brand: p.brand ?? null,
+  name: p.name,
+  regularPrice: p.regularPrice ?? 0,
+  salePrice: p.salePrice ?? 0,
+  image: p.images?.find((i) => i.type === "main")?.url ?? p.images?.[0]?.url ?? null,
+  category: p.category ?? null,
+  leatherMainCategory: p.leatherMainCategory ?? null,
+  subCategory: p.subcategory ?? null,
+  inStock: true,
+  stockQuantity: 1,
+});
+
 function mergeUnique(arrays, limit = 12) {
   const seen = new Set();
   const out = [];
   for (const arr of arrays) {
     if (!arr) continue;
     for (const p of arr) {
-      const id = (p._id || p.id).toString();
+      const id = p._id.toString();
       if (!seen.has(id)) {
         seen.add(id);
         out.push(p);
@@ -22,35 +36,25 @@ function mergeUnique(arrays, limit = 12) {
   return out;
 }
 
-/**
- * Main hybrid recommendation algorithm
- */
+const getTrending = () =>
+  Product.find(STOCK_FILTER)
+    .select(CARD_SELECT)
+    .sort({ sold: -1, rating: -1 })
+    .limit(12)
+    .lean();
+
 exports.getJustForYou = async (req, res) => {
   try {
     const userId = req.params.userId || null;
 
-    // If USER NOT LOGGED IN -> return TRENDING products
     if (!userId) {
-      const trending = await Product.find({
-        $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
-      })
-        .sort({ sold: -1, rating: -1 })
-        .limit(12)
-        .lean();
-      return res.json(trending);
+      return res.json((await getTrending()).map(toCard));
     }
 
     const activity = await UserActivity.findOne({ userId }).lean();
 
-    // If user has no activity -> fallback to trending
     if (!activity) {
-      const trending = await Product.find({
-        $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
-      })
-        .sort({ sold: -1, rating: -1 })
-        .limit(12)
-        .lean();
-      return res.json(trending);
+      return res.json((await getTrending()).map(toCard));
     }
 
     const results = [];
@@ -59,47 +63,42 @@ exports.getJustForYou = async (req, res) => {
     if (activity.lastViewedCategory) {
       const catProducts = await Product.find({
         category: activity.lastViewedCategory,
-        $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
+        ...STOCK_FILTER,
       })
+        .select(CARD_SELECT)
         .sort({ sold: -1, rating: -1 })
         .limit(12)
         .lean();
       results.push(catProducts);
     }
 
-    // 2) Wishlist-based
-    if (activity.wishlist && activity.wishlist.length) {
-      const wishlistProducts = await Product.find({
-        _id: { $in: activity.wishlist },
-      }).lean();
+    // 2) Wishlist-based — fetch only brand/category to derive query params
+    if (activity.wishlist?.length) {
+      const wishlistProducts = await Product.find({ _id: { $in: activity.wishlist } })
+        .select("brand category")
+        .lean();
 
-      const wishlistBrands = [
-        ...new Set(wishlistProducts.map((p) => p.brand).filter(Boolean)),
-      ];
-      const wishlistCats = [
-        ...new Set(wishlistProducts.map((p) => p.category).filter(Boolean)),
-      ];
+      const wishlistBrands = [...new Set(wishlistProducts.map((p) => p.brand).filter(Boolean))];
+      const wishlistCats = [...new Set(wishlistProducts.map((p) => p.category).filter(Boolean))];
 
       if (wishlistBrands.length) {
-        const byBrand = await Product.find({
-          brand: { $in: wishlistBrands },
-          $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
-        })
-          .sort({ sold: -1, rating: -1 })
-          .limit(8)
-          .lean();
-        results.push(byBrand);
+        results.push(
+          await Product.find({ brand: { $in: wishlistBrands }, ...STOCK_FILTER })
+            .select(CARD_SELECT)
+            .sort({ sold: -1, rating: -1 })
+            .limit(8)
+            .lean()
+        );
       }
 
       if (wishlistCats.length) {
-        const byCat = await Product.find({
-          category: { $in: wishlistCats },
-          $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
-        })
-          .sort({ sold: -1, rating: -1 })
-          .limit(8)
-          .lean();
-        results.push(byCat);
+        results.push(
+          await Product.find({ category: { $in: wishlistCats }, ...STOCK_FILTER })
+            .select(CARD_SELECT)
+            .sort({ sold: -1, rating: -1 })
+            .limit(8)
+            .lean()
+        );
       }
     }
 
@@ -107,39 +106,30 @@ exports.getJustForYou = async (req, res) => {
     let avgPrice = activity.averagePriceSeen || 0;
 
     if (!avgPrice && activity.viewedProducts?.length) {
-      const lastViewedProduct = await Product.findById(
-        activity.viewedProducts.slice(-1)[0]
-      ).lean();
-      if (lastViewedProduct) avgPrice = lastViewedProduct.regularPrice || 0;
-    }
-
-    if (avgPrice && avgPrice > 0) {
-      const delta = Math.max(avgPrice * 0.2, 100);
-
-      const priceRange = await Product.find({
-        regularPrice: { $gte: avgPrice - delta, $lte: avgPrice + delta },
-        $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
-      })
-        .sort({ sold: -1 })
-        .limit(12)
+      const lastViewed = await Product.findById(activity.viewedProducts.slice(-1)[0])
+        .select("regularPrice")
         .lean();
-
-      results.push(priceRange);
+      if (lastViewed) avgPrice = lastViewed.regularPrice || 0;
     }
 
-    // 4) Trending Fallback
-    const trending = await Product.find({
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
-    })
-      .sort({ sold: -1, rating: -1 })
-      .limit(12)
-      .lean();
-    results.push(trending);
+    if (avgPrice > 0) {
+      const delta = Math.max(avgPrice * 0.2, 100);
+      results.push(
+        await Product.find({
+          regularPrice: { $gte: avgPrice - delta, $lte: avgPrice + delta },
+          ...STOCK_FILTER,
+        })
+          .select(CARD_SELECT)
+          .sort({ sold: -1 })
+          .limit(12)
+          .lean()
+      );
+    }
 
-    // Merge all results uniquely
-    const merged = mergeUnique(results, 12);
+    // 4) Trending fallback
+    results.push(await getTrending());
 
-    return res.json(merged);
+    return res.json(mergeUnique(results, 12).map(toCard));
   } catch (err) {
     console.error("Recommendation Error:", err);
     return res.status(500).json({ message: "Server error generating recommendations" });

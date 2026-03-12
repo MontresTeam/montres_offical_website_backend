@@ -56,32 +56,46 @@ const createSEOAllpage = async (req, res) => {
 // ⭐ Get SEO Page by slug (frontend)
 const getSeoBySlug = async (req, res) => {
   try {
-    let slug = req.query.slug || "/";
+    let slug = req.query.slug || req.params.slug || req.params[0];
 
-    // normalize slug
-    slug = slug.replace(/^\/+/, "");
+    // Default homepage
+    if (!slug) slug = "/";
 
-    if (!slug) {
-      slug = "/";
-    }
+    // Normalize: remove extra spaces and ensure we handle variations of "/"
+    let cleanSlug = slug.trim();
+
+    // Create variations for the search (with/without leading and trailing slashes)
+    const normalized = cleanSlug.replace(/^\/+|\/+$/g, "");
+    const withLeading = `/${normalized}`;
+    const withTrailing = `${normalized}/`;
+    const withBoth = `/${normalized}/`;
+
+    console.log("Requested slug search:", cleanSlug);
 
     const page = await SeoPage.findOne({
-      slug,
+      $or: [
+        { slug: cleanSlug },
+        { slug: normalized },
+        { slug: withLeading },
+        { slug: withTrailing },
+        { slug: withBoth }
+      ],
       isActive: true,
     });
 
     if (!page) {
+      console.warn("SEO content not found for:", cleanSlug);
       return res.status(404).json({
         message: "SEO content not found",
       });
     }
 
-    return res.json(page);
-  } catch (err) {
-    console.error("SEO by slug error:", err);
-    return res.status(500).json({
+    res.json(page);
+
+  } catch (error) {
+    console.error("SEO fetch error:", error);
+    res.status(500).json({
       message: "Server error",
-      error: err.message,
     });
   }
 };

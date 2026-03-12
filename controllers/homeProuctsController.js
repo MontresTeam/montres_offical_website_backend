@@ -5,7 +5,7 @@ const TrustedProducts = require("../models/trustedModel");
 // Add new homeProducts
 const addHomeProductsGrid = async (req, res) => {
   try {
-    const { title, products } = req.body;
+    const { category, products } = req.body;
 
     // Check max 3 products
     if (products && products.length > 3) {
@@ -15,7 +15,7 @@ const addHomeProductsGrid = async (req, res) => {
     }
 
     // Check max 6 documents in the collection
-    const count = await HomeProducts.countDocuments();
+    const count = await HomeProductsGrid.countDocuments();
     if (count >= 6) {
       return res
         .status(400)
@@ -24,20 +24,20 @@ const addHomeProductsGrid = async (req, res) => {
 
     // Optional: Validate product IDs
     const validProducts = await Product.find({ _id: { $in: products } });
-    if (validProducts.length !== products.length) {
+    if (validProducts.length !== (products ? products.length : 0)) {
       return res
         .status(400)
         .json({ message: "One or more products are invalid" });
     }
 
-    const newHomeProducts = new HomeProducts({ title, products });
+    const newHomeProducts = new HomeProductsGrid({ category, products });
     await newHomeProducts.save();
 
     res
       .status(201)
       .json({
         message: "HomeProductsGrid added successfully",
-        HomeProducts: HomeProducts,
+        homeProducts: newHomeProducts,
       });
   } catch (error) {
     console.error(error);
@@ -48,8 +48,7 @@ const addHomeProductsGrid = async (req, res) => {
 const updateHomeProducts = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, products } = req.body;
-    console.log(req.body);
+    const { category, products } = req.body;
 
     if (products && products.length > 3) {
       return res
@@ -66,16 +65,14 @@ const updateHomeProducts = async (req, res) => {
       }
     }
 
-    const updatedHomeProducts = await HomeProducts.findByIdAndUpdate(
+    const updatedHomeProducts = await HomeProductsGrid.findByIdAndUpdate(
       id,
-      { title, products },
+      { category, products },
       { new: true }
     );
-    console.log(updatedHomeProducts, "if");
     if (!updatedHomeProducts) {
       return res.status(404).json({ message: "HomeProducts not found" });
     }
-    console.log(updatedHomeProducts, "updatedHomeProducts success");
     res
       .status(200)
       .json({
@@ -153,9 +150,6 @@ const getHomeProductsGrid = async (req, res) => {
       { $sort: { subCategory: 1 } },
     ];
 
-    // ── Leather: flat query by `category` field — NOT grouped by style
-    //    Grouping by style was capping total at (styles × 1) = 3 max.
-    //    Flat query returns up to 10, frontend shows 5 per page.
     const flatLeatherPipeline = (categoryValue) => [
       { $match: { ...BASE_MATCH, category: categoryValue } },
       { $sort: { createdAt: -1 } },
@@ -207,23 +201,21 @@ const getHomeProductsGrid = async (req, res) => {
     ]);
 
     const homeProducts = [
-      // Grouped categories (Watch, Accessories)
-      ...GROUPED_CATEGORIES.map(({ title }, i) => ({
-        category: title,
-        groupedProducts: groupedResults[i].map(({ subCategory, products }) => ({
+      {
+        category: "Leather Goods",
+        products: leatherGoodsProducts.map(mapProduct),
+      },
+      {
+        category: "Leather Bags",
+        products: leatherBagsProducts.map(mapProduct),
+      },
+      ...groupedResults.map((grouped, index) => ({
+        category: GROUPED_CATEGORIES[index].title,
+        groupedProducts: grouped.map(({ subCategory, products }) => ({
           subCategory,
           products: products.map(mapProduct),
         })),
       })),
-      // Leather flat lists — wrapped as single "All" group so frontend flatMap works
-      ...(leatherGoodsProducts.length ? [{
-        category: "Leather Goods",
-        groupedProducts: [{ subCategory: "All", products: leatherGoodsProducts.map(mapProduct) }],
-      }] : []),
-      ...(leatherBagsProducts.length ? [{
-        category: "Leather Bags",
-        groupedProducts: [{ subCategory: "All", products: leatherBagsProducts.map(mapProduct) }],
-      }] : []),
     ];
 
     res.status(200).json({
@@ -395,20 +387,37 @@ const updateTrustedProducts = async (req, res) => {
   }
 };
 
+const PRODUCT_FIELDS = "brand name regularPrice salePrice images category leatherMainCategory subCategory";
+
+const toCardShape = (p) => ({
+  _id: p._id,
+  brand: p.brand ?? null,
+  name: p.name,
+  regularPrice: p.regularPrice ?? 0,
+  salePrice: p.salePrice ?? 0,
+  image: p.images?.[0]?.url ?? null,
+  category: p.category ?? null,
+  leatherMainCategory: p.leatherMainCategory ?? null,
+  subCategory: p.subCategory ?? null,
+});
+
 const getTrustedProduct = async (req, res) => {
   try {
     const homeProducts = await TrustedProducts.findOne()
-      .populate("newArrivals")
-      .populate("montresTrusted");
-    // console.log(homeProducts, "homeProducts");
+      .populate("newArrivals", PRODUCT_FIELDS)
+      .populate("montresTrusted", PRODUCT_FIELDS)
+      .lean();
 
     if (!homeProducts) {
-      return res.status(404).json({ message: "No home products found" }); //
+      return res.status(404).json({ message: "No home products found" });
     }
 
     res.status(200).json({
       message: "Home products fetched successfully",
-      data: homeProducts,
+      data: {
+        newArrivals: (homeProducts.newArrivals ?? []).map(toCardShape),
+        montresTrusted: (homeProducts.montresTrusted ?? []).map(toCardShape),
+      },
     });
   } catch (error) {
     console.error("Error fetching home products:", error);

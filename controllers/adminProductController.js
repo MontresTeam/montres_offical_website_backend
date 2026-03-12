@@ -185,6 +185,10 @@ const addProduct = async (req, res) => {
 
       meta: productData.meta || {},
       attributes: productData.attributes || [],
+      publishSchedule: productData.publishSchedule || {
+        status: (productData.published === false || productData.published === "false") ? 'draft' : 'published',
+        scheduledPublish: false
+      },
 
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -197,7 +201,7 @@ const addProduct = async (req, res) => {
       "productionYear gender movement dialColor caseMaterial strapMaterial strapColor dialNumerals " +
       "salePrice regularPrice stockQuantity taxStatus limitedEdition strapSize caseSize includedAccessories " +
       "condition itemCondition category description visibility published featured inStock " +
-      "badges images createdAt updatedAt"
+      "badges images createdAt updatedAt publishSchedule"
     );
 
     res.status(201).json({
@@ -331,6 +335,15 @@ const updateProduct = async (req, res) => {
       images: updatedImages,
       ...(req.body.meta && { meta: req.body.meta }),
       ...(req.body.attributes && { attributes: req.body.attributes }),
+
+      // Support for publishSchedule updates (including dot notation from frontend)
+      ...(req.body.publishSchedule && { publishSchedule: req.body.publishSchedule }),
+      ...(req.body['publishSchedule.status'] && { 'publishSchedule.status': req.body['publishSchedule.status'] }),
+      ...(req.body['publishSchedule.publishDate'] && { 'publishSchedule.publishDate': req.body['publishSchedule.publishDate'] }),
+      ...(req.body['publishSchedule.scheduledPublish'] !== undefined && {
+        'publishSchedule.scheduledPublish': parseBoolean(req.body['publishSchedule.scheduledPublish'])
+      }),
+
       updatedAt: new Date(),
     };
 

@@ -355,6 +355,16 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
 
+    publishSchedule: {
+      scheduledPublish: { type: Boolean, default: false },
+      publishDate: { type: Date },
+      status: {
+        type: String,
+        enum: ["draft", "scheduled", "published"],
+        default: "published",
+      },
+    },
+
     // ────────────── MEDIA ──────────────
     images: [imageSchema],
 
@@ -907,24 +917,43 @@ productSchema.index({
   published: 1,
 });
 
-// Text search index
+// Compound index for stock/availability filtering (used by search queries)
+productSchema.index({ published: 1, stockQuantity: 1, inStock: 1 });
+
+// Text search index — covers all searchable fields with relevance weights
 productSchema.index(
   {
     name: "text",
     brand: "text",
     model: "text",
-    sku: "text",
-    description: "text",
+    referenceNumber: "text",
     accessoryName: "text",
+    sku: "text",
+    category: "text",
+    leatherMainCategory: "text",
+    leatherSubCategory: "text",
+    watchType: "text",
+    watchStyle: "text",
+    accessoryCategory: "text",
+    accessorySubCategory: "text",
+    description: "text",
   },
   {
     name: "product_search_index",
     weights: {
       name: 10,
-      brand: 8,
+      brand: 10,
       model: 8,
+      referenceNumber: 8,
       accessoryName: 8,
       sku: 6,
+      category: 4,
+      leatherMainCategory: 4,
+      leatherSubCategory: 4,
+      watchType: 4,
+      watchStyle: 4,
+      accessoryCategory: 4,
+      accessorySubCategory: 4,
       description: 1,
     },
   }

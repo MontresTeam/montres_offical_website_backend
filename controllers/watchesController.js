@@ -135,11 +135,16 @@ const buildWatchFilter = (query) => {
   }
 
   // Handle price range
-  if (minPrice || maxPrice) {
+  // Use Number() to correctly handle '0' (string) vs false/undefined
+  const parsedMinPrice = minPrice !== undefined && minPrice !== null && minPrice !== '' ? Number(minPrice) : null;
+  const parsedMaxPrice = maxPrice !== undefined && maxPrice !== null && maxPrice !== '' ? Number(maxPrice) : null;
+  if (parsedMinPrice !== null || parsedMaxPrice !== null) {
     const priceFilter = {};
-    if (minPrice) priceFilter.$gte = parseInt(minPrice);
-    if (maxPrice) priceFilter.$lte = parseInt(maxPrice);
-    andConditions.push({ salePrice: priceFilter });
+    if (parsedMinPrice !== null && !isNaN(parsedMinPrice)) priceFilter.$gte = parsedMinPrice;
+    if (parsedMaxPrice !== null && !isNaN(parsedMaxPrice)) priceFilter.$lte = parsedMaxPrice;
+    if (Object.keys(priceFilter).length > 0) {
+      andConditions.push({ salePrice: priceFilter });
+    }
   }
 
   // Handle availability
@@ -157,6 +162,20 @@ const buildWatchFilter = (query) => {
     }
   }
 
+  // Handle Free-text Search
+  if (query.search && query.search.trim()) {
+    const searchRegex = new RegExp(query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    andConditions.push({
+      $or: [
+        { name: searchRegex },
+        { brand: searchRegex },
+        { model: searchRegex },
+        { description: searchRegex },
+        { referenceNumber: searchRegex }
+      ]
+    });
+  }
+
   return andConditions;
 };
 
@@ -168,12 +187,18 @@ const getAllWatches = async (req, res) => {
       sortBy = "newest"
     } = req.query;
 
+    // 🔍 Debug: Print received query params
+    console.log("[Watch Filter Debug] Received query params:", JSON.stringify(req.query, null, 2));
+
     let filter = { category: "Watch", published: true };
     const andConditions = buildWatchFilter(req.query);
 
     if (andConditions.length > 0) {
       filter.$and = andConditions;
     }
+
+    // 🔍 Debug: Print generated MongoDB filter
+    console.log("[Watch Filter Debug] Generated MongoDB filter:", JSON.stringify(filter, null, 2));
 
     const sortOptions = {
       newest: { createdAt: -1 },
@@ -193,6 +218,10 @@ const getAllWatches = async (req, res) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
 
     const totalProducts = await Product.countDocuments(filter);
+
+    // 🔍 Debug: Print count result
+    console.log(`[Watch Filter Debug] Total products matching filter: ${totalProducts}`);
+
     const products = await Product.find(filter)
       .sort(sort)
       .skip((pageNum - 1) * limitNum)
