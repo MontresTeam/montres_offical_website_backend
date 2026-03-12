@@ -517,7 +517,6 @@ const preScoring = async (req, res) => {
       }
     }
 
-
     res.json({
       success: true,
       eligible,
