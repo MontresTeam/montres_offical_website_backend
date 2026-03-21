@@ -1,4 +1,17 @@
 require('dotenv').config(); // Must be first
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Optional: You might want to log this to a service or exit gracefully
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  // For safety, you might want to restart the process in production
+  // but for now, we just log it to see where it comes from.
+});
 const express = require('express');
 const connectDB = require("./config/db");
 const cors = require('cors');
@@ -27,10 +40,11 @@ const webhookRoute = require("./routes/webhookRoutes");
 const brandRoutes = require('./routes/brandRoutes');
 const purchaseRoutes = require('./routes/purchaseRoutes');
 const newsletterRoutes = require('./routes/newsletterRoutes');
-const offerRoutes = require('./routes/offerRoutes');
+const { offerRouter, adminOfferRouter } = require('./routes/offerRoutes');
 const blogRoutes = require('./routes/blogRoutes');
 const chatRoutes = require("./routes/chatRoutes");
 const pushRoutes = require("./routes/pushRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 const http = require('http');
 const { Server } = require('socket.io');
@@ -100,6 +114,7 @@ app.use("/api/tamara", tamaraRouter);
 
 app.use("/api/contact", contactRoutes);
 app.use("/api/admin/order", orderRoute);
+app.use("/api/admin/orders", orderRoute);
 app.use("/api/address", addressRoutes);
 app.use("/api/payment", orderRoute);
 app.use("/api/order", orderRoute);
@@ -123,10 +138,12 @@ app.use("/api/seo-pages", seoRoutes);
 app.use("/api/brands", brandRoutes);
 app.use("/api/purchase", purchaseRoutes);
 app.use("/api/newsletter", newsletterRoutes);
-app.use("/api/offers", offerRoutes);
+app.use("/api/offers", offerRouter);
+app.use("/api/admin/offers", adminOfferRouter);
 app.use("/api/blogs", blogRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/push", pushRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 
 // ✅ Catch-all generic /api route MUST be last

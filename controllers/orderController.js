@@ -7,7 +7,9 @@ const stripePkg = require("stripe");
 
 
 const stripe = process.env.STRIPE_SECRET_KEY
-  ? stripePkg(process.env.STRIPE_SECRET_KEY)
+  ? stripePkg(process.env.STRIPE_SECRET_KEY, {
+    telemetry: false, // Disable background requests that can cause ECONNRESET crashes
+  })
   : null;
 
 const createStripeOrder = async (req, res) => {
@@ -15,50 +17,92 @@ const createStripeOrder = async (req, res) => {
     const { userId } = req.user;
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const { items, shippingAddress, billingAddress, paymentMethod = "stripe", calculateOnly = false } = req.body;
+    const { items, shippingAddress, billingAddress, paymentMethod = "stripe", calculateOnly = false, existingOrderId } = req.body;
 
     if (!items?.length) return res.status(400).json({ message: "Cart items are required" });
     if (!shippingAddress?.address1 || !shippingAddress?.city) return res.status(400).json({ message: "Valid shipping address is required" });
 
     const finalBillingAddress = billingAddress?.address1 && billingAddress?.city ? billingAddress : shippingAddress;
 
-    const populatedItems = await Promise.all(
-      items.map(async (it) => {
-        const product = await Product.findById(it.productId).select("name images salePrice sku").lean();
-        if (!product) throw new Error(`Product not found: ${it.productId}`);
-        return {
-          productId: product._id,
-          name: product.name,
-          image: product.images?.[0]?.url || "",
-          price: product.salePrice || 0,
-          quantity: it.quantity || 1,
-          sku: product.sku || "",
-        };
-      })
-    );
+    let order;
+    let populatedItems = [];
+    let subtotal = 0;
+    let shippingFee = 0;
+    let total = 0;
+    let region = "";
 
-    const subtotal = populatedItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
-    const { shippingFee, region } = calculateShippingFee({ country: shippingAddress.country, subtotal });
-    const total = subtotal + shippingFee;
+    if (existingOrderId) {
+      order = await Order.findById(existingOrderId);
+      if (!order) return res.status(404).json({ message: "Existing order not found" });
 
-    if (calculateOnly) {
-      return res.status(200).json({ success: true, subtotal, shippingFee, total, region, items: populatedItems });
+      // Use items from existing order (important for fixed offer prices)
+      populatedItems = order.items;
+      subtotal = order.subtotal;
+
+      // Re-calculate shipping if address country changed or if it was missing
+      const calc = calculateShippingFee({ country: shippingAddress.country, subtotal });
+      shippingFee = calc.shippingFee;
+      region = calc.region;
+      total = subtotal + shippingFee;
+
+      if (!calculateOnly) {
+        order.shippingAddress = shippingAddress;
+        order.billingAddress = finalBillingAddress;
+        order.shippingFee = shippingFee;
+        order.total = total;
+        order.region = region;
+        order.paymentMethod = paymentMethod;
+        await order.save();
+      }
+    } else {
+      populatedItems = await Promise.all(
+        items.map(async (it) => {
+          const product = await Product.findById(it.productId).select("name images salePrice regularPrice sku").lean();
+          if (!product) throw new Error(`Product not found: ${it.productId}`);
+          return {
+            productId: product._id,
+            name: product.name,
+            image: product.images?.[0]?.url || "",
+            price: it.price || product.salePrice || product.regularPrice || 0,
+            regularPrice: product.regularPrice, // Added to capture original price
+            quantity: it.quantity || 1,
+            sku: product.sku || "",
+          };
+        })
+      );
+
+      subtotal = populatedItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
+      const originalPriceTotal = populatedItems.reduce((acc, item) => acc + (item.regularPrice || item.price) * item.quantity, 0);
+
+      const calc = calculateShippingFee({ country: shippingAddress.country, subtotal });
+      shippingFee = calc.shippingFee;
+      region = calc.region;
+      total = subtotal + shippingFee;
+
+      if (calculateOnly) {
+        return res.status(200).json({ success: true, subtotal, originalPrice: originalPriceTotal, shippingFee, total, region, items: populatedItems });
+      }
+
+      order = await Order.create({
+        userId,
+        items: populatedItems,
+        subtotal,
+        originalPrice: originalPriceTotal,
+        vat: 0,
+        shippingFee,
+        total,
+        region,
+        shippingAddress,
+        billingAddress: finalBillingAddress,
+        paymentMethod,
+        paymentStatus: "pending",
+        currency: "AED",
+      });
     }
 
-    const order = await Order.create({
-      userId,
-      items: populatedItems,
-      subtotal,
-      vat: 0,
-      shippingFee,
-      total,
-      region,
-      shippingAddress,
-      billingAddress: finalBillingAddress,
-      paymentMethod,
-      paymentStatus: "pending",
-      currency: "AED",
-    });
+    if (calculateOnly) {
+      return res.status(200).json({ success: true, subtotal, originalPrice: order.originalPrice, shippingFee, total, region, items: populatedItems });
+    }
 
     if (paymentMethod === "stripe" && stripe) {
       const session = await stripe.checkout.sessions.create({

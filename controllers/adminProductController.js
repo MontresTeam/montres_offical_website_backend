@@ -178,6 +178,16 @@ const addProduct = async (req, res) => {
       seoDescription: productData.seoDescription || "",
       seoKeywords: parseJSON(productData.seoKeywords),
 
+      // Make Offer System
+      make_offer_enabled: parseBoolean(productData.make_offer_enabled),
+      minimum_offer_type: productData.minimum_offer_type || "percentage",
+      minimum_offer_percentage: parseNumber(productData.minimum_offer_percentage) || 80,
+      minimum_offer_amount: parseNumber(productData.minimum_offer_amount) || 0,
+      suggested_offer_percentages: parseJSON(productData.suggested_offer_percentages) || [95, 90, 85],
+      acceptance_probability_rules: parseJSON(productData.acceptance_probability_rules) || { high: 95, possible: 90, low: 85 },
+      auto_counter_offer_threshold: parseNumber(productData.auto_counter_offer_threshold) || 70,
+      offer_expiration_time: parseIntNum(productData.offer_expiration_time) || 24,
+
       published: productData.published ?? true,
       featured: productData.featured ?? false,
 
@@ -335,6 +345,16 @@ const updateProduct = async (req, res) => {
       images: updatedImages,
       ...(req.body.meta && { meta: req.body.meta }),
       ...(req.body.attributes && { attributes: req.body.attributes }),
+
+      // Make Offer System Updates
+      ...(req.body.make_offer_enabled !== undefined && { make_offer_enabled: parseBoolean(req.body.make_offer_enabled) }),
+      ...(req.body.minimum_offer_type !== undefined && { minimum_offer_type: req.body.minimum_offer_type }),
+      ...(req.body.minimum_offer_percentage !== undefined && { minimum_offer_percentage: parseNumber(req.body.minimum_offer_percentage) }),
+      ...(req.body.minimum_offer_amount !== undefined && { minimum_offer_amount: parseNumber(req.body.minimum_offer_amount) }),
+      ...(req.body.suggested_offer_percentages !== undefined && { suggested_offer_percentages: parseJSON(req.body.suggested_offer_percentages) }),
+      ...(req.body.acceptance_probability_rules !== undefined && { acceptance_probability_rules: parseJSON(req.body.acceptance_probability_rules) }),
+      ...(req.body.auto_counter_offer_threshold !== undefined && { auto_counter_offer_threshold: parseNumber(req.body.auto_counter_offer_threshold) }),
+      ...(req.body.offer_expiration_time !== undefined && { offer_expiration_time: parseIntNum(req.body.offer_expiration_time) }),
 
       // Support for publishSchedule updates (including dot notation from frontend)
       ...(req.body.publishSchedule && { publishSchedule: req.body.publishSchedule }),

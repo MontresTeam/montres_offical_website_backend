@@ -603,86 +603,130 @@ const createTabbyOrder = async (req, res) => {
     const buyerPhone = buyerInfo.phone || shippingAddress?.phone || "+971500000001";
     const buyerName = buyerInfo.name || `${shippingAddress?.firstName || "Test"} ${shippingAddress?.lastName || "User"}`;
 
-    // Populate items
-    let populatedItems = [];
-    if (!dummy && Array.isArray(items) && items.length > 0) {
-      populatedItems = await Promise.all(items.map(async (it) => {
-        const productId = it.productId || it.reference_id || it.id;
-        const product = await Product.findById(productId).select("name images salePrice sku referenceNumber category").lean();
-        if (!product) {
-          return {
-            productId: productId && mongoose.Types.ObjectId.isValid(productId) ? productId : null,
-            name: it.name || it.title || "Product",
-            image: it.image || "",
-            price: Number(it.price || it.unit_price || 0),
-            quantity: Number(it.quantity || 1),
-            sku: it.sku || it.reference_id || "N/A",
-            category: "Accessories" // Fallback
-          };
-        }
-        return {
-          productId: product._id,
-          name: product.name,
-          image: product.images?.[0]?.url || product.images?.[0] || "",
-          price: product.salePrice || 0,
-          quantity: it.quantity || 1,
-          sku: product.sku || product.referenceNumber || product._id.toString(),
-          category: product.category || "Watch"
-        };
-      }));
-    } else {
-      populatedItems = [{
-        productId: null,
-        name: "Dummy Watch",
-        image: "https://www.montres.ae/logo.png",
-        price: 100,
-        quantity: 1,
-        sku: "DUMMY-001",
-        category: "Watch"
-      }];
-    }
-
-
     const currency = req.body.currency || "AED";
     const decimals = ["KWD", "BHD", "OMR"].includes(currency.toUpperCase()) ? 3 : 2;
 
-    const subtotal = (populatedItems.reduce((acc, item) => acc + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0)) || 0;
-    const { shippingFee, region } = shippingCalculator.calculateShippingFee({ country: shippingAddress?.country || "AE", subtotal });
-    const total = parseFloat((subtotal + shippingFee).toFixed(decimals)) || 0;
+    let order;
+    let populatedItems = [];
+    let subtotal = 0;
+    let shippingFee = 0;
+    let total = 0;
+    let region = "";
+    let referenceId = "";
 
-    if (!total || total <= 0) {
-      console.warn("  [5] ❌ Total amount is zero or invalid — aborting");
-      return res.status(400).json({ success: false, message: "Invalid order amount. Please check your cart." });
-    }
+    const { existingOrderId } = req.body;
 
-    const referenceId = `tabby_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    if (existingOrderId) {
+      order = await Order.findById(existingOrderId);
+      if (!order) return res.status(404).json({ success: false, message: "Existing order not found" });
 
-    // ✅ NEW: Create order in database first
-    const newOrder = await Order.create({
-      userId: req.user?.userId || null,
-      orderId: referenceId,
-      items: populatedItems,
-      subtotal: subtotal,
-      shippingFee: shippingFee,
-      total: total,
-      region: region,
-      paymentMethod: "tabby",
-      paymentStatus: "pending",
-      orderStatus: "Pending",
-      currency: currency,
-      shippingAddress: {
-        firstName: shippingAddress?.firstName || "Customer",
-        lastName: shippingAddress?.lastName || "User",
+      populatedItems = order.items;
+      subtotal = order.subtotal;
+
+      const calc = shippingCalculator.calculateShippingFee({ country: shippingAddress?.country || "AE", subtotal });
+      shippingFee = calc.shippingFee;
+      region = calc.region;
+      total = parseFloat((subtotal + shippingFee).toFixed(decimals));
+      referenceId = order.orderId || `tabby_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+
+      order.shippingAddress = {
+        firstName: shippingAddress?.firstName || order.shippingAddress?.firstName,
+        lastName: shippingAddress?.lastName || order.shippingAddress?.lastName,
         email: buyerEmail,
         phone: buyerPhone,
-        city: shippingAddress?.city || "Dubai",
-        street: shippingAddress?.address1 || shippingAddress?.street || "N/A",
-        country: normalizeCountry(shippingAddress?.country),
-        postalCode: shippingAddress?.postalCode || ""
+        city: shippingAddress?.city || order.shippingAddress?.city,
+        street: shippingAddress?.address1 || shippingAddress?.street || order.shippingAddress?.street || "N/A",
+        country: normalizeCountry(shippingAddress?.country || order.shippingAddress?.country),
+        postalCode: shippingAddress?.postalCode || order.shippingAddress?.postalCode || ""
+      };
+      order.orderId = referenceId;
+      order.shippingFee = shippingFee;
+      order.total = total;
+      order.region = region;
+      order.paymentMethod = "tabby";
+      await order.save();
+    } else {
+      // Populate items for new order
+      if (!dummy && Array.isArray(items) && items.length > 0) {
+        populatedItems = await Promise.all(items.map(async (it) => {
+          const productId = it.productId || it.reference_id || it.id;
+          const product = await Product.findById(productId).select("name images salePrice regularPrice sku referenceNumber category").lean();
+          if (!product) {
+            return {
+              productId: productId && mongoose.Types.ObjectId.isValid(productId) ? productId : null,
+              name: it.name || it.title || "Product",
+              image: it.image || "",
+              price: Number(it.price || it.unit_price || 0),
+              quantity: Number(it.quantity || 1),
+              sku: it.sku || it.reference_id || "N/A",
+              category: "Accessories" // Fallback
+            };
+          }
+          return {
+            productId: product._id,
+            name: product.name,
+            image: product.images?.[0]?.url || product.images?.[0] || "",
+            price: it.price || it.unit_price || product.salePrice || product.regularPrice || 0,
+            quantity: it.quantity || 1,
+            sku: product.sku || product.referenceNumber || product._id.toString(),
+            category: product.category || "Watch"
+          };
+        }));
+      } else {
+        populatedItems = [{
+          productId: null,
+          name: "Dummy Watch",
+          image: "https://www.montres.ae/logo.png",
+          price: 100,
+          quantity: 1,
+          sku: "DUMMY-001",
+          category: "Watch"
+        }];
       }
-    });
 
-    console.log(`📝 Pending Tabby order created: ${newOrder._id} (ID: ${referenceId})`);
+      subtotal = (populatedItems.reduce((acc, item) => acc + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0)) || 0;
+      const calc = shippingCalculator.calculateShippingFee({ country: shippingAddress?.country || "AE", subtotal });
+      shippingFee = calc.shippingFee;
+      region = calc.region;
+      total = parseFloat((subtotal + shippingFee).toFixed(decimals)) || 0;
+
+      if (!total || total <= 0) {
+        console.warn("  [5] ❌ Total amount is zero or invalid — aborting");
+        return res.status(400).json({ success: false, message: "Invalid order amount. Please check your cart." });
+      }
+
+      referenceId = `tabby_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+
+      // Calculate originalPrice for new regular order
+      const originalPriceTotal = populatedItems.reduce((acc, item) => acc + (item.regularPrice || item.price) * item.quantity, 0);
+
+      order = await Order.create({
+        userId: req.user?.userId || null,
+        orderId: referenceId,
+        items: populatedItems,
+        subtotal: subtotal,
+        originalPrice: originalPriceTotal,
+        shippingFee: shippingFee,
+        total: total,
+        region: region,
+        paymentMethod: "tabby",
+        paymentStatus: "pending",
+        orderStatus: "Pending",
+        currency: currency,
+        shippingAddress: {
+          firstName: shippingAddress?.firstName || "Customer",
+          lastName: shippingAddress?.lastName || "User",
+          email: buyerEmail,
+          phone: buyerPhone,
+          city: shippingAddress?.city || "Dubai",
+          street: shippingAddress?.address1 || shippingAddress?.street || "N/A",
+          country: normalizeCountry(shippingAddress?.country),
+          postalCode: shippingAddress?.postalCode || ""
+        }
+      });
+    }
+
+    console.log(`📝 Tabby order prepared: ${order._id} (ID: ${referenceId})`);
 
     const clientUrl = process.env.CLIENT_URL || "https://www.montres.ae";
 
@@ -814,7 +858,7 @@ const createTabbyOrder = async (req, res) => {
       console.error("  [8] ❌ No checkout URL in Tabby response — status:", response.data?.status);
       console.error("       Full response:", JSON.stringify(response.data, null, 2));
       console.log("══════════════════════════════════════════════════\n");
-      await Order.findByIdAndDelete(newOrder._id);
+      await Order.findByIdAndDelete(order._id);
 
       const installments = response.data?.configuration?.available_products?.installments?.[0];
       const rawReason = response.data?.rejection_reason_code
@@ -859,8 +903,8 @@ const createTabbyOrder = async (req, res) => {
     console.log(`  ✅ Checkout URL obtained: ${paymentUrl}`);
     console.log("══════════════════════════════════════════════════\n");
 
-    newOrder.tabbySessionId = response.data.id;
-    await newOrder.save();
+    order.tabbySessionId = response.data.id;
+    await order.save();
 
     return res.status(201).json({ success: true, referenceId, checkoutUrl: paymentUrl });
 

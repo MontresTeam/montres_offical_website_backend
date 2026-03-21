@@ -7,6 +7,11 @@ const offerSchema = new mongoose.Schema(
             ref: "Product",
             required: false, // Optional for manual offers where product might be deleted or just text
         },
+        user: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            required: false, // Optional for guests if allowed, but user asked for user_id
+        },
         productName: {
             type: String,
             required: true,
@@ -23,14 +28,21 @@ const offerSchema = new mongoose.Schema(
             type: Number,
             required: true,
         },
-        offeredPrice: {
+        offerPrice: {
             type: Number,
             required: true,
+        },
+        offerPercentage: {
+            type: Number,
+            required: true,
+        },
+        counterPrice: {
+            type: Number,
         },
         token: {
             type: String,
             unique: true,
-            sparse: true, // Only for tokens that exist
+            sparse: true,
         },
         expiresAt: {
             type: Date,
@@ -42,6 +54,10 @@ const offerSchema = new mongoose.Schema(
         },
         message: {
             type: String,
+        },
+        order: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Order",
         },
     },
     {

@@ -53,6 +53,7 @@ const orderSchema = new mongoose.Schema(
     items: [orderItemSchema],
 
     subtotal: { type: Number, required: true },
+    originalPrice: { type: Number }, // Added for Make Offer system
     vat: { type: Number, default: 0 },
     shippingFee: { type: Number, default: 0 },
     total: { type: Number, required: true },

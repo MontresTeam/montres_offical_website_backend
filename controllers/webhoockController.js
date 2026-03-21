@@ -1,7 +1,9 @@
 const Order = require("../models/OrderModel");
 const User = require("../models/UserModel");
 const sendEmail = require("../utils/sendEmail");
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY, {
+    telemetry: false, // Disable background requests often causing ECONNRESET on Windows
+});
 const crypto = require("crypto");
 
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;

@@ -355,6 +355,42 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
 
+    // ────────────── MAKE OFFER SYSTEM ──────────────
+    make_offer_enabled: {
+      type: Boolean,
+      default: false,
+    },
+    minimum_offer_type: {
+      type: String,
+      enum: ["percentage", "amount"],
+      default: "percentage",
+    },
+    minimum_offer_percentage: {
+      type: Number,
+      default: 80, // Allow offers down to 80% by default
+    },
+    minimum_offer_amount: {
+      type: Number,
+      default: 0,
+    },
+    suggested_offer_percentages: {
+      type: [Number],
+      default: [95, 90, 85],
+    },
+    acceptance_probability_rules: {
+      high: { type: Number, default: 95 },
+      possible: { type: Number, default: 90 },
+      low: { type: Number, default: 85 },
+    },
+    auto_counter_offer_threshold: {
+      type: Number,
+      default: 70,
+    },
+    offer_expiration_time: {
+      type: Number,
+      default: 24, // 24, 48, 72 hours
+    },
+
     publishSchedule: {
       scheduledPublish: { type: Boolean, default: false },
       publishDate: { type: Date },

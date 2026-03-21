@@ -13,6 +13,11 @@ const sendEmail = async (to, subject, htmlContent, textContent = "") => {
             },
         });
 
+        // Add error listener to prevent app crashes on unhandled connection errors
+        transporter.on('error', (err) => {
+            console.error('Nodemailer SendEmail Transporter Error:', err);
+        });
+
         // Strip HTML tags for a clean text version if not provided
         const plainText = textContent || htmlContent.replace(/<[^>]*>?/gm, '');
 

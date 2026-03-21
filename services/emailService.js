@@ -3,13 +3,36 @@ const nodemailer = require('nodemailer');
 // Create transporter
 const transporter = nodemailer.createTransport({
   service: "gmail",
+  pool: true, // Use pooling for better connection management
+  maxConnections: 5,
+  maxMessages: 100,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS, // Gmail App Password, not your Gmail password
   },
   tls: {
-    rejectUnauthorized: false, // <-- allows self-signed certificates
+    rejectUnauthorized: false,
   },
+  connectionTimeout: 10000, // 10 seconds
+  greetingTimeout: 10000,
+  socketTimeout: 30000, // 30 seconds
+});
+
+// Verify connection configuration
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("❌ Email Service Error during verification:", error.message);
+    if (error.message.includes("535")) {
+      console.error("💡 TIP: This is likely a 'Bad Credentials' error. Please ensure you are using a 'Gmail App Password', not your regular Gmail password.");
+    }
+  } else {
+    console.log("✅ Email service is ready to take our messages");
+  }
+});
+
+// Handle transporter errors to prevent app crashes on connection reset
+transporter.on('error', (err) => {
+  console.error('Nodemailer Transporter Error:', err);
 });
 
 // Welcome email function
@@ -55,20 +78,12 @@ const sendWelcomeEmail = async (email, name) => {
               <!-- Email Container -->
               <table class="container" width="600" cellpadding="0" cellspacing="0" style="margin:0 auto;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.05);">
                 
-                <!-- Header with Gradient -->
+                <!-- Header -->
                 <tr>
-                  <td class="header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);padding:40px 30px;text-align:center;">
-                    <table width="100%">
-                      <tr>
-                        <td align="center">
-                          <div style="background-color:rgba(255,255,255,0.15);width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;">
-                            <span style="font-size:40px;color:#fff;">👋</span>
-                          </div>
-                          <h1 style="color:#ffffff;font-size:28px;font-weight:600;margin:0 0 10px;letter-spacing:-0.5px;">Welcome to Montres!</h1>
-                          <p style="color:rgba(255,255,255,0.85);font-size:16px;margin:0;line-height:1.5;">Your account is ready</p>
-                        </td>
-                      </tr>
-                    </table>
+                  <td class="header" style="background-color: #1a1a1a; padding: 40px; text-align: center;">
+                    <h1 style="color: #c5a059; margin: 0; font-size: 24px; letter-spacing: 4px; font-weight: 700;">MONTRES</h1>
+                    <div style="width: 40px; height: 1px; background-color: #c5a059; margin: 15px auto;"></div>
+                    <p style="color: #ffffff; margin: 5px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; opacity: 0.8;">Welcome to the Community</p>
                   </td>
                 </tr>
                 
@@ -150,10 +165,10 @@ const sendWelcomeEmail = async (email, name) => {
                     <table width="100%" style="margin:40px 0 30px;">
                       <tr>
                         <td align="center">
-                          <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/login" 
+                          <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/login" 
                              class="btn" 
-                             style="display:inline-block;background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);color:#ffffff;text-decoration:none;padding:16px 32px;border-radius:8px;font-weight:600;font-size:16px;letter-spacing:0.5px;box-shadow:0 4px 15px rgba(102,126,234,0.3);transition:all 0.3s ease;">
-                            Access Your Account
+                             style="display:inline-block;background-color: #1a1a1a;color:#ffffff;text-decoration:none;padding:18px 45px;border-radius:8px;font-weight:700;font-size:14px;letter-spacing:1px;box-shadow:0 10px 20px rgba(0,0,0,0.1);">
+                            ACCESS YOUR ACCOUNT
                           </a>
                         </td>
                       </tr>
@@ -225,8 +240,8 @@ const sendWelcomeEmail = async (email, name) => {
 
 // Manual offer email function
 const sendManualOfferEmail = async (offerData, offerLink) => {
-  console.log(offerLink,"offerLink");
-  
+  console.log(offerLink, "offerLink");
+
   const { customerName, customerEmail, productName, offeredPrice, originalPrice, expiresAt } = offerData;
   const expiryDate = expiresAt ? new Date(expiresAt).toLocaleDateString('en-US', {
     weekday: 'long',
@@ -263,10 +278,10 @@ const sendManualOfferEmail = async (offerData, offerLink) => {
                 
                 <!-- Header -->
                 <tr>
-                  <td class="header" style="background: linear-gradient(135deg, #1a1a1a 0%, #333333 100%);padding:50px 40px;text-align:center;color:#ffffff;">
-                    <div style="font-size:14px;text-transform:uppercase;letter-spacing:3px;margin-bottom:15px;opacity:0.8;">Exclusive Invitation</div>
-                    <h1 style="font-size:32px;margin:0;font-weight:700;letter-spacing:-1px;">Your Private Offer</h1>
-                    <div style="width:50px;height:2px;background-color:#c5a059;margin:25px auto;"></div>
+                  <td class="header" style="background-color: #1a1a1a; padding: 50px 40px; text-align: center;">
+                    <h1 style="color: #c5a059; margin: 0; font-size: 24px; letter-spacing: 4px; font-weight: 700;">MONTRES</h1>
+                    <div style="width: 40px; height: 1px; background-color: #c5a059; margin: 15px auto;"></div>
+                    <p style="color: #ffffff; margin: 5px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 3px; opacity: 0.8;">Exclusive Private Invitation</p>
                   </td>
                 </tr>
                 
@@ -351,5 +366,504 @@ const sendManualOfferEmail = async (offerData, offerLink) => {
   }
 };
 
+// --- Offer Related Emails ---
+
+const formatCurrency = (amount) => `AED ${amount.toLocaleString()}`;
+
+/**
+ * Unified Luxury Wrapper for Customer Emails
+ */
+const luxuryEmailWrapper = (content, title, accentColor = "#c5a358") => `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    @media only screen and (max-width: 600px) {
+      .container { width: 100% !important; border-radius: 0 !important; }
+      .content { padding: 40px 20px !important; }
+      .cta-btn { width: 100% !important; text-align: center !important; padding: 22px 20px !important; }
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #ffffff; padding: 60px 0;">
+    <tr>
+      <td align="center">
+        <table class="container" width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border: 1px solid #f2f2f2; overflow: hidden;">
+          
+          <!-- Luxury Header -->
+          <tr>
+            <td style="padding: 60px 40px 40px; text-align: center;">
+              <h1 style="color: #1a1a1a; margin: 0; font-size: 24px; letter-spacing: 5px; font-weight: 300; text-transform: uppercase;">MONTRES</h1>
+              <div style="width: 30px; height: 1px; background-color: ${accentColor}; margin: 20px auto;"></div>
+              <p style="color: ${accentColor}; margin: 0; font-size: 10px; text-transform: uppercase; letter-spacing: 3px; font-weight: 700;">${title}</p>
+            </td>
+          </tr>
+
+          <!-- Content Body -->
+          <tr>
+            <td class="content" style="padding: 0 60px 60px;">
+              ${content}
+            </td>
+          </tr>
+
+          <!-- Minimal Footer -->
+          <tr>
+            <td style="padding: 0 60px 40px; text-align: center; border-top: 1px solid #f8f8f8; padding-top: 30px;">
+              <p style="color: #bbbbbb; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; margin: 0;">
+                &copy; ${new Date().getFullYear()} MONTRES LUXURY MARKETPLACE &bull; ALL RIGHTS RESERVED
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+
+// 1. Offer Submitted Confirmation
+const sendOfferConfirmationEmail = async (offerData) => {
+  const { customerEmail, customerName, productName, offerPrice, originalPrice, token } = offerData;
+  const websiteUrl = process.env.CLIENT_URL || "https://www.montres.ae";
+  const offerLink = `${websiteUrl}/offer/${token}`;
+
+  const content = `
+    <h2 style="color: #1a1a1a; font-size: 18px; font-weight: 500; margin: 0 0 25px; text-transform: uppercase; letter-spacing: 1px; text-align: center;">Hello ${customerName},</h2>
+    
+    <p style="color: #555555; font-size: 14px; line-height: 1.8; margin: 0 0 40px; text-align: center; font-weight: 300;">
+      Your offer has been sent to the seller for the <strong>${productName}</strong>. They will review it and respond shortly.
+    </p>
+
+    <!-- Pricing Summary -->
+    <table width="100%" style="border-top: 1px solid #f8f8f8; border-bottom: 1px solid #f8f8f8; margin-bottom: 40px;">
+      <tr>
+        <td style="padding: 25px 0; text-align: left;">
+          <span style="display: block; color: #999999; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px;">Listed Price</span>
+          <span style="color: #333333; font-size: 16px; font-weight: 400;">${formatCurrency(originalPrice)}</span>
+        </td>
+        <td style="padding: 25px 0; text-align: right;">
+          <span style="display: block; color: #c5a358; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px;">Your Offer</span>
+          <span style="color: #c5a358; font-size: 16px; font-weight: 600;">${formatCurrency(offerPrice)}</span>
+        </td>
+      </tr>
+    </table>
+
+    <div style="text-align: center; margin-bottom: 20px;">
+        <p style="color: #999999; font-size: 11px; margin: 0 0 35px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 300;">
+            Seller will respond within 24 hours.
+        </p>
+        <a href="${offerLink}" class="cta-btn" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; text-decoration: none; padding: 22px 50px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 3px;">VIEW OFFER STATUS</a>
+    </div>
+  `;
+
+  const mailOptions = {
+    from: `"Montres Store" <${process.env.EMAIL_USER}>`,
+    to: customerEmail,
+    subject: "Your Offer Has Been Submitted",
+    html: luxuryEmailWrapper(content, "Offer Submitted Successfully")
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+// 2. Offer Status Update / Transitions (Accepted, Rejected, Countered)
+const sendOfferStatusUpdateEmail = async (offerData, status, extra = null) => {
+  const { customerEmail, customerName, productName, token, offerPrice, counterPrice, originalPrice } = offerData;
+  const websiteUrl = process.env.CLIENT_URL || "https://www.montres.ae";
+  const offerLink = `${websiteUrl}/offer/${token}`;
+
+  let title = "Offer Update";
+  let accentColor = "#c5a358";
+  let content = "";
+  let subject = `Offer Update: ${productName}`;
+
+  if (status === 'accepted') {
+    accentColor = "#10b981";
+    title = "Offer Accepted";
+    subject = "Your Offer Has Been Accepted 🎉";
+    const finalPrice = counterPrice || offerPrice || extra;
+
+    content = `
+      <h2 style="color: #1a1a1a; font-size: 18px; font-weight: 500; margin: 0 0 25px; text-transform: uppercase; letter-spacing: 1px; text-align: center;">GREAT NEWS!</h2>
+      
+      <p style="color: #555555; font-size: 14px; line-height: 1.8; margin: 0 0 40px; text-align: center; font-weight: 300;">
+        Great news! Your offer has been accepted for the <strong>${productName}</strong>.
+      </p>
+
+      <div style="background-color: #f9fafb; border: 1px solid #f3f4f6; border-radius: 4px; padding: 30px; text-align: center; margin-bottom: 40px;">
+          <p style="color: #1a1a1a; font-size: 10px; text-transform: uppercase; letter-spacing: 3px; font-weight: 700; margin-bottom: 10px;">Final Price</p>
+          <p style="color: #1a1a1a; font-size: 32px; font-weight: 600; margin: 0;">${formatCurrency(finalPrice)}</p>
+      </div>
+
+      <div style="text-align: center;">
+          <a href="${offerLink}" class="cta-btn" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; text-decoration: none; padding: 22px 50px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 3px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">SECURE CHECKOUT</a>
+      </div>
+    `;
+  } else if (status === 'rejected') {
+    accentColor = "#ef4444";
+    title = "Offer Not Accepted";
+    subject = "Your Offer Was Not Accepted";
+
+    content = `
+      <h2 style="color: #1a1a1a; font-size: 18px; font-weight: 500; margin: 0 0 25px; text-transform: uppercase; letter-spacing: 1px; text-align: center;">Hello ${customerName},</h2>
+      
+      <p style="color: #555555; font-size: 14px; line-height: 1.8; margin: 0 0 30px; text-align: center; font-weight: 300;">
+        The seller did not accept your offer for the <strong>${productName}</strong>.
+      </p>
+
+      <div style="background-color: #fffafb; border: 1px solid #fee2e2; padding: 25px; text-align: center; margin-bottom: 40px;">
+          <p style="color: #ef4444; font-size: 12px; margin: 0; font-weight: 500; letter-spacing: 0.5px;">
+            Try a higher offer to increase chances.
+          </p>
+      </div>
+
+      <div style="text-align: center;">
+          <a href="${websiteUrl}/WatchDetailPage/${offerData.product?._id || offerData.product}" class="cta-btn" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; text-decoration: none; padding: 22px 50px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 3px;">MAKE NEW OFFER</a>
+      </div>
+    `;
+  } else if (status === 'countered') {
+    title = "Counter Offer Received";
+    subject = "Seller Sent You a Counter Offer";
+    const cPrice = extra || counterPrice;
+
+    content = `
+      <h2 style="color: #1a1a1a; font-size: 18px; font-weight: 500; margin: 0 0 25px; text-transform: uppercase; letter-spacing: 1px; text-align: center;">Hello ${customerName},</h2>
+      
+      <p style="color: #555555; font-size: 14px; line-height: 1.8; margin: 0 0 40px; text-align: center; font-weight: 300;">
+        The seller has provided a counter offer for your review.
+      </p>
+
+      <table width="100%" style="border-top: 1px solid #f8f8f8; border-bottom: 1px solid #f8f8f8; margin-bottom: 40px;">
+        <tr>
+          <td style="padding: 25px 0; text-align: left;">
+            <span style="display: block; color: #999999; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px;">Your Offer</span>
+            <span style="color: #333333; font-size: 16px; font-weight: 400;">${formatCurrency(offerPrice)}</span>
+          </td>
+          <td style="padding: 25px 0; text-align: right;">
+            <span style="display: block; color: #c5a358; font-size: 9px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px;">Seller Counter Offer</span>
+            <span style="color: #c5a358; font-size: 20px; font-weight: 700;">${formatCurrency(cPrice)}</span>
+          </td>
+        </tr>
+      </table>
+
+      <div style="text-align: center;">
+          <a href="${offerLink}" class="cta-btn" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; text-decoration: none; padding: 22px 50px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 3px;">VIEW OFFER</a>
+      </div>
+    `;
+  }
+
+  const mailOptions = {
+    from: `"Montres Store" <${process.env.EMAIL_USER}>`,
+    to: customerEmail,
+    subject: subject,
+    html: luxuryEmailWrapper(content, title, accentColor)
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+// 4. Counter Offer received Alert
+const sendCounterOfferEmail = async (offerData, counterPrice, expirationHours) => {
+  return sendOfferStatusUpdateEmail(offerData, 'countered', counterPrice);
+};
+
+
+// 5. Offer Alerts (To Admin)
+const sendAdminOfferNotification = async (offerData) => {
+  const { productName, customerName, customerEmail, offerPrice, originalPrice, status, orderId } = offerData;
+  const targetEmail = process.env.ADMIN_EMAIL || 'admin@montres.ae';
+  const adminUrl = process.env.ADMIN_URL || '#';
+
+  let subject = `🚨 New Offer: ${customerName}`;
+  let title = "New Offer Received";
+  let accentColor = "#1a1a1a";
+  let content = "";
+  let badgeText = "Pending Review";
+
+  if (status === "COUNTER_OFFER_ACCEPTED") {
+    subject = `Customer Accepted Your Counter Offer 🎉`;
+    title = "Offer Confirmed";
+    badgeText = "COUNTER ACCEPTED";
+    accentColor = "#10b981";
+    content = `
+      <div style="text-align: center; margin-bottom: 30px;">
+        <p style="color: #666; font-size: 14px; margin-bottom: 20px;">Good news! The customer has accepted your counter offer.</p>
+        <div style="background-color: #f0fdf4; border: 1px solid #dcfce7; padding: 25px; border-radius: 4px;">
+           <p style="color: #15803d; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px;">Final Agreed Price</p>
+           <p style="color: #15803d; font-size: 24px; font-weight: 700; margin: 0;">${formatCurrency(offerPrice)}</p>
+        </div>
+      </div>
+      <p style="color: #555; font-size: 13px; text-align: center; margin-bottom: 30px;">You can now proceed with order processing.</p>
+      <div style="text-align: center;">
+          <a href="${adminUrl}/admin/orders/${orderId || ''}" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; text-decoration: none; padding: 18px 35px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; border-radius: 2px;">VIEW ORDER DETAILS</a>
+      </div>
+    `;
+  } else if (status === "COUNTER_OFFER_REJECTED") {
+    subject = `Customer Rejected Your Counter Offer`;
+    title = "Counter Offer Rejected";
+    accentColor = "#ef4444";
+    badgeText = "COUNTER REJECTED";
+    content = `
+      <div style="text-align: center; margin-bottom: 30px;">
+        <p style="color: #666; font-size: 14px; margin-bottom: 20px;">The customer has declined your counter offer.</p>
+        <div style="background-color: #fffafb; border: 1px solid #fee2e2; padding: 25px; border-radius: 4px;">
+           <p style="color: #ef4444; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px;">Your Rejected Counter</p>
+           <p style="color: #ef4444; font-size: 24px; font-weight: 700; margin: 0;">${formatCurrency(offerPrice)}</p>
+        </div>
+      </div>
+      <p style="color: #555; font-size: 13px; text-align: center; margin-bottom: 30px;">You may send a new counter offer or wait for a new offer.</p>
+      <div style="text-align: center;">
+          <a href="${adminUrl}/offers" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; text-decoration: none; padding: 18px 35px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; border-radius: 2px;">VIEW OFFER</a>
+      </div>
+    `;
+  } else {
+    // Default: New Offer Submitted
+    const discount = (((originalPrice - offerPrice) / originalPrice) * 100).toFixed(0);
+    content = `
+      <div style="margin-bottom: 30px;">
+        <table width="100%" style="border-collapse: collapse; margin-bottom: 30px;">
+          <tr>
+            <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-size: 13px;">Product</td>
+            <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; color: #1a1a1a; font-weight: 600; text-align: right;">${productName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-size: 13px;">Customer</td>
+            <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; color: #1a1a1a; text-align: right;">${customerName} (${customerEmail})</td>
+          </tr>
+          <tr>
+            <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-size: 13px;">Bid Amount</td>
+            <td style="padding: 15px 0; border-bottom: 1px solid #f1f5f9; color: #1a1a1a; font-weight: 700; font-size: 18px; text-align: right;">${formatCurrency(offerPrice)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 15px 0; color: #64748b; font-size: 13px;">Discount</td>
+            <td style="padding: 15px 0; color: #ef4444; font-weight: 700; text-align: right;">-${discount}% off List</td>
+          </tr>
+        </table>
+        <div style="text-align: center;">
+            <a href="${adminUrl}/offers" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; text-decoration: none; padding: 18px 35px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; border-radius: 2px;">MANAGE IN DASHBOARD</a>
+        </div>
+      </div>
+    `;
+  }
+
+  const html = luxuryEmailWrapper(title, content, accentColor, badgeText);
+
+  const mailOptions = {
+    from: `"Montres Boutique" <${process.env.EMAIL_USER}>`,
+    to: targetEmail,
+    subject: subject,
+    html: html
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+
+// 6. Order Confirmation (To Customer)
+const sendOrderConfirmationEmail = async (order) => {
+  const { shippingAddress, items, total, subtotal, shippingFee, currency, _id } = order;
+
+  const itemsHTML = items.map(item => `
+    <tr>
+      <td style="padding: 12px; border-bottom: 1px solid #eee;">
+        <div style="display: flex; align-items: center;">
+          <img src="${item.image}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px; margin-right: 12px;">
+          <div>
+            <p style="margin: 0; font-weight: 600; color: #333;">${item.name}</p>
+            <p style="margin: 0; font-size: 12px; color: #666;">Qty: ${item.quantity}</p>
+          </div>
+        </div>
+      </td>
+      <td style="padding: 12px; border-bottom: 1px solid #eee; text-align: right; color: #333;">
+        ${currency} ${(item.price * item.quantity).toLocaleString()}
+      </td>
+    </tr>
+  `).join('');
+
+  const mailOptions = {
+    from: `"Montres Store" <${process.env.EMAIL_USER}>`,
+    to: shippingAddress.email,
+    subject: `✅ Order Confirmed: #${_id.toString().slice(-6).toUpperCase()}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          @media only screen and (max-width: 600px) {
+            .container { width: 100% !important; border-radius: 0 !important; }
+          }
+        </style>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 40px 0;">
+          <tr>
+            <td align="center">
+              <table class="container" width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+                <tr>
+                  <td style="background: linear-gradient(135deg, #1a1a1a 0%, #333333 100%); padding: 40px; text-align: center;">
+                    <h1 style="color: #d4af37; margin: 0; font-size: 28px; letter-spacing: 2px;">MONTRES</h1>
+                    <p style="color: #ffffff; margin: 10px 0 0; font-size: 14px; opacity: 0.8; text-transform: uppercase; letter-spacing: 3px;">Order Confirmation</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 40px;">
+                    <h2 style="color: #333; margin: 0 0 20px;">Thank you for your order!</h2>
+                    <p style="color: #666; font-size: 16px; line-height: 1.6;">
+                      Hi ${shippingAddress.firstName}, we've received your order and are getting it ready for shipment. 
+                      You'll receive another email with tracking information once your package is on its way.
+                    </p>
+                    
+                    <div style="margin: 30px 0; padding: 20px; border: 1px solid #eee; border-radius: 8px; background-color: #fafafa;">
+                      <p style="margin: 0 0 10px; font-size: 13px; color: #999; text-transform: uppercase;">Order Number</p>
+                      <p style="margin: 0; font-size: 18px; font-weight: 700; color: #333;">#${_id.toString().toUpperCase()}</p>
+                    </div>
+
+                    <h3 style="color: #333; border-bottom: 2px solid #f4f4f4; padding-bottom: 10px; margin-top: 40px;">Order Summary</h3>
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      ${itemsHTML}
+                      <tr>
+                        <td style="padding: 20px 12px 5px; text-align: right; color: #666;">Subtotal</td>
+                        <td style="padding: 20px 12px 5px; text-align: right; color: #333;">${currency} ${subtotal.toLocaleString()}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 5px 12px; text-align: right; color: #666;">Shipping</td>
+                        <td style="padding: 5px 12px; text-align: right; color: #333;">${currency} ${shippingFee.toLocaleString()}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 15px 12px; text-align: right; font-size: 18px; font-weight: 700; color: #333;">Total</td>
+                        <td style="padding: 15px 12px; text-align: right; font-size: 18px; font-weight: 700; color: #d4af37;">${currency} ${total.toLocaleString()}</td>
+                      </tr>
+                    </table>
+
+                    <h3 style="color: #333; border-bottom: 2px solid #f4f4f4; padding-bottom: 10px; margin-top: 40px;">Shipping Address</h3>
+                    <p style="color: #666; font-size: 15px; line-height: 1.6; margin: 15px 0 0;">
+                      ${shippingAddress.firstName} ${shippingAddress.lastName}<br>
+                      ${shippingAddress.address1}${shippingAddress.address2 ? ', ' + shippingAddress.address2 : ''}<br>
+                      ${shippingAddress.city}, ${shippingAddress.country}<br>
+                      Phone: ${shippingAddress.phone}
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background-color: #f9f9f9; padding: 30px; text-align: center; border-top: 1px solid #eee;">
+                    <p style="color: #888; font-size: 14px; margin: 0;">Questions? Contact us at support@montres.ae</p>
+                  </td>
+                </tr>
+              </table>
+              <p style="color: #aaa; font-size: 12px; margin-top: 20px;">
+                &copy; ${new Date().getFullYear()} Montres Store. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+// 7. Restock Notification (To Customer)
+const sendRestockNotification = async (email, productName, productUrl, productThumbnail) => {
+  const mailOptions = {
+    from: `"Montres Store" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: `✨ Back in Stock: ${productName}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 40px 0;">
+          <tr>
+            <td align="center">
+              <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05);">
+                <tr>
+                  <td style="padding: 50px 40px; text-align: center;">
+                    <div style="display: inline-block; padding: 10px 20px; background-color: #f0fdf4; color: #16a34a; border-radius: 30px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px;">
+                      It's Back!
+                    </div>
+                    <h1 style="color: #1a1a1a; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -1px;">Back in Stock</h1>
+                    <p style="color: #64748b; font-size: 18px; line-height: 1.6; margin: 15px 0 40px;">
+                      Good news! The <strong>${productName}</strong> you were looking for is now available again. 
+                      Act fast, as stock is limited!
+                    </p>
+                    
+                    ${productThumbnail ? `
+                      <div style="margin-bottom: 40px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
+                        <img src="${productThumbnail}" alt="${productName}" style="width: 100%; max-width: 300px; height: auto; border-radius: 8px;">
+                      </div>
+                    ` : ''}
+
+                    <a href="${productUrl}" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; text-decoration: none; padding: 20px 45px; border-radius: 12px; font-weight: 700; font-size: 16px; box-shadow: 0 10px 20px rgba(0,0,0,0.1);">
+                      SHOP NOW
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background-color: #1a1a1a; padding: 40px; text-align: center;">
+                    <p style="color: #94a3b8; font-size: 14px; margin: 0 0 10px;">You're receiving this because you signed up for restock alerts.</p>
+                    <p style="color: #ffffff; font-size: 18px; font-weight: 700; letter-spacing: 2px;">MONTRES</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+// 8. Offer Expired (To Customer)
+const sendOfferExpiredEmail = async (offerData) => {
+  const { customerEmail, customerName, productName } = offerData;
+  const websiteUrl = process.env.CLIENT_URL || "https://www.montres.ae";
+
+  const content = `
+    <h2 style="color: #1a1a1a; font-size: 18px; font-weight: 500; margin: 0 0 25px; text-transform: uppercase; letter-spacing: 1px; text-align: center;">Hello ${customerName},</h2>
+    
+    <p style="color: #555555; font-size: 14px; line-height: 1.8; margin: 0 0 40px; text-align: center; font-weight: 300;">
+      Your offer has expired without response for the <strong>${productName}</strong>.
+    </p>
+
+    <div style="text-align: center;">
+        <a href="${websiteUrl}/WatchDetailPage/${offerData.product?._id || offerData.product}" class="cta-btn" style="display: inline-block; background-color: #1a1a1a; color: #ffffff; text-decoration: none; padding: 22px 50px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 3px;">SUBMIT NEW OFFER</a>
+    </div>
+  `;
+
+  const mailOptions = {
+    from: `"Montres Store" <${process.env.EMAIL_USER}>`,
+    to: customerEmail,
+    subject: "Your Offer Has Expired",
+    html: luxuryEmailWrapper(content, "Offer Expired", "#94a3b8")
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+
 // For CommonJS export
-module.exports = { transporter, sendWelcomeEmail, sendManualOfferEmail };
+module.exports = {
+  transporter,
+  sendWelcomeEmail,
+  sendOrderConfirmationEmail,
+  sendRestockNotification,
+  sendOfferConfirmationEmail,
+  sendOfferStatusUpdateEmail,
+  sendCounterOfferEmail,
+  sendAdminOfferNotification,
+  sendManualOfferEmail,
+  sendOfferExpiredEmail
+};

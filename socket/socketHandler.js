@@ -14,6 +14,11 @@ let adminSocketConnected = false;
 const socketHandler = (io) => {
     io.on('connection', (socket) => {
         console.log('User connected:', socket.id);
+
+        // Handle socket errors to prevent app crashes
+        socket.on('error', (err) => {
+            console.error(`Socket error for ${socket.id}:`, err);
+        });
         let currentUserId = null;
         let currentUserRole = null;
 

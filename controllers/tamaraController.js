@@ -71,56 +71,103 @@ const createTamaraOrder = async (req, res) => {
                 ? billingAddress
                 : shippingAddress;
 
+        const { existingOrderId } = req.body;
+        let order;
+        let populatedItems = [];
+        let subtotal = 0;
+        let shippingFee = 0;
+        let total = 0;
+
+        if (existingOrderId) {
+            order = await Order.findById(existingOrderId);
+            if (!order) return res.status(404).json({ success: false, message: "Existing order not found" });
+
+            populatedItems = order.items;
+            subtotal = order.subtotal;
+
+            const calc = calculateShippingFee({
+                country: shippingAddress?.country || order.shippingAddress?.country || "AE",
+                subtotal
+            });
+            shippingFee = calc.shippingFee;
+            total = subtotal + shippingFee;
+
+            order.shippingAddress = shippingAddress;
+            order.billingAddress = finalBillingAddress;
+            order.shippingFee = shippingFee;
+            order.total = total;
+            order.paymentMethod = "tamara";
+            await order.save();
+        } else {
+            // ===============================
+            // FETCH PRODUCTS for new order
+            // ===============================
+            populatedItems = await Promise.all(
+                items.map(async (it) => {
+                    const product = await Product.findById(it.productId)
+                        .select("name images salePrice regularPrice stockQuantity published sku")
+                        .lean();
+
+                    if (!product) throw new Error("Product not found");
+                    if (!product.published) throw new Error("Product unavailable");
+
+                    const price = it.price || it.unit_price || product.salePrice || product.regularPrice || 0;
+
+                    return {
+                        productId: product._id,
+                        name: product.name,
+                        image: product.images?.[0]?.url || "",
+                        price: Number(price),
+                        regularPrice: product.regularPrice, // Capture regular price for originalPrice calculation
+                        quantity: Number(it.quantity) || 1,
+                        sku: product.sku || product._id.toString(),
+                    };
+                })
+            );
+
+            subtotal = populatedItems.reduce(
+                (acc, item) => acc + item.price * item.quantity,
+                0
+            );
+
+            const calc = calculateShippingFee({
+                country: shippingAddress?.country || "AE",
+                subtotal
+            });
+            shippingFee = calc.shippingFee;
+            total = subtotal + shippingFee;
+
+            // Calculate originalPrice for new regular order
+            const originalPriceTotal = populatedItems.reduce((acc, item) => acc + (item.regularPrice || item.price) * item.quantity, 0);
+
+            order = await Order.create({
+                userId,
+                items: populatedItems,
+                subtotal,
+                originalPrice: originalPriceTotal,
+                shippingFee,
+                total,
+                vat: 0,
+                currency: "AED",
+                settlementCurrency: "AED",
+                fxRate: 1,
+                shippingAddress,
+                billingAddress: finalBillingAddress,
+                paymentMethod: "tamara",
+                paymentStatus: "pending",
+            });
+        }
+
+        const orderId = order._id.toString();
+
         // ===============================
-        // FETCH PRODUCTS
+        // TAMARA ITEMS & TOTAL
         // ===============================
-
-        const populatedItems = await Promise.all(
-            items.map(async (it) => {
-                const product = await Product.findById(it.productId)
-                    .select("name images salePrice regularPrice stockQuantity published sku")
-                    .lean();
-
-                if (!product) throw new Error("Product not found");
-                if (!product.published) throw new Error("Product unavailable");
-
-                const price = product.salePrice || product.regularPrice || 0;
-
-                return {
-                    productId: product._id,
-                    name: product.name,
-                    image: product.images?.[0]?.url || "",
-                    price: Number(price),
-                    quantity: Number(it.quantity) || 1,
-                    sku: product.sku || product._id.toString(),
-                };
-            })
-        );
-
-        // ===============================
-        // CALCULATIONS (NO FX CONVERSION)
-        // ===============================
-
-        const subtotal = populatedItems.reduce(
-            (acc, item) => acc + item.price * item.quantity,
-            0
-        );
-
-        const { shippingFee } = calculateShippingFee({
-            country: shippingAddress?.country || "AE", // Tamara UAE only supports AED, so country is fixed to AE
-            subtotal
-        });
-        const total = subtotal + shippingFee;
-
-        // ===============================
-        // TAMARA ITEMS
-        // ===============================
-
-        const tamaraItems = populatedItems.map((item) => ({
+        const tamaraItems = order.items.map((item) => ({
             name: item.name,
             type: "Physical",
-            reference_id: item.productId.toString(),
-            sku: item.productId.toString(),
+            reference_id: item.productId?.toString() || item.sku,
+            sku: item.sku || item.productId?.toString(),
             quantity: item.quantity,
             unit_price: {
                 amount: Number(item.price.toFixed(2)),
@@ -132,27 +179,7 @@ const createTamaraOrder = async (req, res) => {
             },
         }));
 
-        const tamaraTotal = Number(total.toFixed(2));
-
-        // ===============================
-        // CREATE ORDER IN DB
-        // ===============================
-
-        const order = await Order.create({
-            userId,
-            items: populatedItems,
-            subtotal,
-            shippingFee,
-            total,
-            vat: 0,
-            currency: "AED",
-            settlementCurrency: "AED",
-            fxRate: 1,
-            shippingAddress,
-            billingAddress: finalBillingAddress,
-            paymentMethod: "tamara",
-            paymentStatus: "pending",
-        });
+        const tamaraTotal = Number(order.total.toFixed(2));
 
         const baseUrl =
             process.env.CLIENT_URL ||
@@ -161,8 +188,6 @@ const createTamaraOrder = async (req, res) => {
         const backendUrl =
             process.env.BACKEND_URL ||
             "https://api.montres.ae";
-
-        const orderId = order._id.toString();
 
         const tamaraPayload = {
             order_reference_id: orderId,

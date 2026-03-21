@@ -107,6 +107,9 @@ const getProducts = async (req, res) => {
       sortOrder = "desc",
       featured,
       referenceNumber,
+      search,
+      searchField,
+      isAdmin,
       // Advanced filters
       type,
       dialColor,
@@ -146,9 +149,35 @@ const getProducts = async (req, res) => {
     const pageNum = Math.max(1, parseInt(page, 10));
     const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10)));
 
-    // ✅ Base Filter - only published products
-    const filterQuery = { published: true };
+    // ✅ Base Filter
+    const filterQuery = (isAdmin === "true" || isAdmin === true) ? {} : { published: true };
     const andConditions = [];
+
+    // ✅ Search Filter
+    if (search) {
+      const searchRegex = new RegExp(search.trim(), "i");
+      if (searchField && searchField !== "all") {
+        const fieldMap = {
+          name: "name",
+          sku: "sku",
+          brand: "brand",
+          model: "model",
+          ref: "referenceNumber",
+        };
+        const targetField = fieldMap[searchField] || searchField;
+        andConditions.push({ [targetField]: searchRegex });
+      } else {
+        andConditions.push({
+          $or: [
+            { name: searchRegex },
+            { sku: searchRegex },
+            { brand: searchRegex },
+            { model: searchRegex },
+            { referenceNumber: searchRegex },
+          ],
+        });
+      }
+    }
 
     // 🔹 Helper to normalize comma-separated or array inputs
     const normalizeArray = (value) => {
@@ -512,7 +541,10 @@ const getProducts = async (req, res) => {
       .select(
         "brand name regularPrice salePrice stockQuantity inStock sku " +
         "condition category leatherMainCategory subCategory " +
-        "images limitedEdition badges featured createdAt updatedAt publishSchedule"
+        "images limitedEdition badges featured createdAt updatedAt publishSchedule " +
+        "make_offer_enabled minimum_offer_type minimum_offer_percentage minimum_offer_amount " +
+        "suggested_offer_percentages acceptance_probability_rules auto_counter_offer_threshold " +
+        "offer_expiration_time"
       )
       .sort(sortObj)
       .skip((pageNum - 1) * limitNum)
@@ -671,7 +703,10 @@ const getProductById = async (req, res) => {
         "salePrice regularPrice stockQuantity taxStatus strapSize caseSize " +
         "includedAccessories condition itemCondition category description " +
         "visibility published featured inStock badges images createdAt updatedAt " +
-        "waterResistance complications crystal limitedEdition"
+        "waterResistance complications crystal limitedEdition " +
+        "make_offer_enabled minimum_offer_type minimum_offer_percentage minimum_offer_amount " +
+        "suggested_offer_percentages acceptance_probability_rules auto_counter_offer_threshold " +
+        "offer_expiration_time"
       )
       .lean();
 

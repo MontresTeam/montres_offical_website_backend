@@ -63,7 +63,7 @@ const Registration = async (req, res) => {
     const accessToken = generateAccessToken(newUser._id, newUser.email);
     const refreshToken = generateRefreshToken(newUser._id);
 
-    // Set refresh token
+    // Set refresh token in user document
     newUser.refreshToken = refreshToken;
 
     // Save user -> Triggers pre('save') hook ONCE -> Hashes password -> Stores in DB
@@ -72,24 +72,27 @@ const Registration = async (req, res) => {
     // 🚀 Send Welcome Email (non-blocking)
     sendWelcomeEmail(newUser.email, newUser.name).catch(console.log);
 
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/",
+    };
+
     res
       .cookie("accessToken", accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        ...cookieOptions,
         maxAge: 15 * 60 * 1000, // 15 minutes
-        path: "/",
       })
       .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        path: "/",
+        ...cookieOptions,
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       })
       .status(201)
       .json({
         message: "Registration successful",
+        accessToken, // Returning in body for flexibility
+        refreshToken,
         user: {
           id: newUser._id,
           name: newUser.name,
@@ -134,24 +137,27 @@ const Login = async (req, res) => {
     user.refreshToken = refreshToken;
     await user.save();
 
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/",
+    };
+
     res
       .cookie("accessToken", accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        ...cookieOptions,
         maxAge: 15 * 60 * 1000, // 15 minutes
-        path: "/",
       })
       .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        path: "/",
+        ...cookieOptions,
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       })
       .status(200)
       .json({
         message: "Login successful",
+        accessToken,
+        refreshToken,
         user: { id: user._id, name: user.name, email: user.email },
       });
   } catch (err) {
@@ -161,19 +167,27 @@ const Login = async (req, res) => {
 
 const logout = async (req, res) => {
   try {
-    // ✅ Clear tokens
-    res.clearCookie("accessToken", {
+    // Clear cookies first
+    const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       path: "/",
-    });
-    res.clearCookie("refreshToken", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-    });
+    };
+
+    // Optional: Clear refreshToken in DB for security
+    const token = req.cookies.refreshToken;
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.USER_REFRESH_TOKEN_SECRET);
+        await userModel.findByIdAndUpdate(decoded.id, { $unset: { refreshToken: 1 } });
+      } catch (err) {
+        // Token might be expired, just ignore
+      }
+    }
+
+    res.clearCookie("accessToken", cookieOptions);
+    res.clearCookie("refreshToken", cookieOptions);
 
     return res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {
@@ -184,36 +198,59 @@ const logout = async (req, res) => {
 
 const RefreshToken = async (req, res) => {
   try {
-    const token = req.cookies.refreshToken;
-    if (!token) return res.status(401).json({ message: "No refresh token" });
+    const token = req.cookies.refreshToken || req.body.refreshToken;
+    if (!token) {
+      return res.status(401).json({ message: "No refresh token provided" });
+    }
 
-    jwt.verify(
-      token,
-      process.env.USER_REFRESH_TOKEN_SECRET,
-      async (err, decoded) => {
-        if (err)
-          return res
-            .status(403)
-            .json({ message: "Invalid or expired refresh token" });
+    // Use a promise-based verify for cleaner code
+    const decoded = await new Promise((resolve, reject) => {
+      jwt.verify(token, process.env.USER_REFRESH_TOKEN_SECRET, (err, decoded) => {
+        if (err) reject(err);
+        else resolve(decoded);
+      });
+    });
 
-        const user = await userModel.findById(decoded.id);
-        if (!user || user.refreshToken !== token)
-          return res.status(403).json({ message: "Invalid refresh token" });
+    const user = await userModel.findById(decoded.id);
+    if (!user || user.refreshToken !== token) {
+      return res.status(403).json({ message: "Invalid or expired refresh token" });
+    }
 
-        const newAccessToken = generateAccessToken(user._id, user.email);
+    // Generate new tokens (Rotation)
+    const newAccessToken = generateAccessToken(user._id, user.email);
+    const newRefreshToken = generateRefreshToken(user._id);
 
-        res.cookie("accessToken", newAccessToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          maxAge: 15 * 60 * 1000,
-          path: "/",
-        });
+    // Update refresh token in DB
+    user.refreshToken = newRefreshToken;
+    await user.save();
 
-        return res.status(200).json({ message: "Token refreshed" });
-      }
-    );
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/",
+    };
+
+    res
+      .cookie("accessToken", newAccessToken, {
+        ...cookieOptions,
+        maxAge: 15 * 60 * 1000,
+      })
+      .cookie("refreshToken", newRefreshToken, {
+        ...cookieOptions,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+
+    return res.status(200).json({
+      message: "Token refreshed",
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+    });
   } catch (error) {
+    console.error("Refresh Token Error:", error);
+    if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
+      return res.status(403).json({ message: "Invalid or expired refresh token" });
+    }
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
