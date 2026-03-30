@@ -36,6 +36,7 @@ const imageUploadUpdate = (req, res, next) => {
     if (err) return res.status(400).json({ error: err.message });
 
     try {
+      // 1. Handle file upload (multipart/form-data)
       if (req.file) {
         const result = await cloudinary.uploader.upload(req.file.path, {
           folder: "MontresTradingLLC/ProfileImages",
@@ -47,9 +48,20 @@ const imageUploadUpdate = (req, res, next) => {
         });
 
         req.body.profilePicture = result.secure_url;
+        fs.unlink(req.file.path, () => { }); // delete temp file
+      }
+      // 2. Handle base64 string (application/json)
+      else if (req.body.profilePicture && req.body.profilePicture.startsWith("data:image/")) {
+        const result = await cloudinary.uploader.upload(req.body.profilePicture, {
+          folder: "MontresTradingLLC/ProfileImages",
+          resource_type: "image",
+          transformation: [
+            { width: 600, height: 600, crop: "limit" },
+            { quality: "auto", fetch_format: "auto" },
+          ],
+        });
 
-        // delete temp file
-        fs.unlink(req.file.path, () => {});
+        req.body.profilePicture = result.secure_url;
       }
 
       next();

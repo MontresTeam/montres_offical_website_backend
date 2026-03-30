@@ -1588,8 +1588,12 @@ const getLimitedEditionProducts = async (req, res) => {
     const raw = await Product.find({
       limitedEdition: true,
       published: true,
+      inStock: true,
+      stockQuantity: { $gt: 0 },
     })
-      .select("brand name regularPrice salePrice images category leatherMainCategory subCategory")
+      .select(
+        "brand name regularPrice salePrice images category leatherMainCategory subCategory inStock stockQuantity"
+      )
       .lean();
 
     const products = raw.map((p) => ({
@@ -1602,6 +1606,8 @@ const getLimitedEditionProducts = async (req, res) => {
       category: p.category ?? null,
       leatherMainCategory: p.leatherMainCategory ?? null,
       subCategory: p.subCategory ?? null,
+      inStock: p.inStock ?? true,
+      stockQuantity: p.stockQuantity ?? 1,
     }));
 
     res.status(200).json({

@@ -190,6 +190,8 @@ const getHomeProductsGrid = async (req, res) => {
       category: p.category ?? null,
       leatherMainCategory: p.leatherMainCategory ?? null,
       subCategory: p.subCategory ?? null,
+      inStock: p.inStock ?? true,
+      stockQuantity: p.stockQuantity ?? 1,
     });
 
     const [leatherGoodsProducts, leatherBagsProducts, ...groupedResults] = await Promise.all([
@@ -387,7 +389,7 @@ const updateTrustedProducts = async (req, res) => {
   }
 };
 
-const PRODUCT_FIELDS = "brand name regularPrice salePrice images category leatherMainCategory subCategory";
+const PRODUCT_FIELDS = "brand name regularPrice salePrice images category leatherMainCategory subCategory inStock stockQuantity";
 
 const toCardShape = (p) => ({
   _id: p._id,
@@ -399,6 +401,8 @@ const toCardShape = (p) => ({
   category: p.category ?? null,
   leatherMainCategory: p.leatherMainCategory ?? null,
   subCategory: p.subCategory ?? null,
+  inStock: p.inStock ?? true,
+  stockQuantity: p.stockQuantity ?? 1,
 });
 
 const getTrustedProduct = async (req, res) => {
@@ -412,11 +416,20 @@ const getTrustedProduct = async (req, res) => {
       return res.status(404).json({ message: "No home products found" });
     }
 
+    const rawData = {
+      newArrivals: (homeProducts.newArrivals ?? []).filter(
+        (p) => p.inStock && p.stockQuantity > 0
+      ),
+      montresTrusted: (homeProducts.montresTrusted ?? []).filter(
+        (p) => p.inStock && p.stockQuantity > 0
+      ),
+    };
+
     res.status(200).json({
       message: "Home products fetched successfully",
       data: {
-        newArrivals: (homeProducts.newArrivals ?? []).map(toCardShape),
-        montresTrusted: (homeProducts.montresTrusted ?? []).map(toCardShape),
+        newArrivals: rawData.newArrivals.map(toCardShape),
+        montresTrusted: rawData.montresTrusted.map(toCardShape),
       },
     });
   } catch (error) {

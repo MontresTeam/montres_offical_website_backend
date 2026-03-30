@@ -2,34 +2,37 @@ const ProfileModal = require("../models/userProfileModal");
 
 const createUserProfile = async (req, res) => {
   try {
-    const { userId } = req.user; // comes from protected auth middleware
-
-    // Check if profile exists
-    const existingProfile = await ProfileModal.findById(userId);
-    if (existingProfile) {
-      return res.status(409).json({ message: "Profile already exists — use update" });
-    }
-
+    const { userId } = req.user; // from protected auth middleware
     const { name, email, phone, country, address, profilePicture } = req.body;
 
     if (!name || !email || !address) {
       return res.status(400).json({ message: "Required fields missing" });
     }
 
-    const profile = await ProfileModal.create({
-      _id: userId,
-      name,
-      email,
-      phone,
-      country,
-      address,
-      profilePicture,
-    });
+    // Upsert the profile (Create or Update)
+    const profile = await ProfileModal.findByIdAndUpdate(
+      userId,
+      {
+        name,
+        email,
+        phone,
+        country,
+        address,
+        profilePicture,
+      },
+      { new: true, upsert: true, runValidators: true }
+    );
 
-    return res.status(201).json({ message: "Profile created successfully", user: profile });
+    return res.status(201).json({ message: "Profile updated successfully", user: profile });
   } catch (err) {
     console.error("Profile create error:", err);
-    return res.status(500).json({ message: "Server error" });
+
+    // Handle MongoDB duplicate key error (most likely email)
+    if (err.code === 11000) {
+      return res.status(400).json({ message: "A profile with this email or user ID already exists." });
+    }
+
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
@@ -42,7 +45,11 @@ const getUserProfile = async (req, res) => {
 
     const profile = await ProfileModal.findById(userId);
     if (!profile) {
-      return res.status(404).json({ message: "Profile not found" });
+      return res.status(200).json({
+        message: "Profile not found",
+        user: null,
+        orderCount: 0
+      });
     }
 
     return res.status(200).json({ message: "Profile fetched successfully", user: profile });
@@ -54,6 +61,6 @@ const getUserProfile = async (req, res) => {
 
 
 module.exports = {
-   createUserProfile,
-   getUserProfile
-   };
+  createUserProfile,
+  getUserProfile
+};

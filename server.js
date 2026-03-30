@@ -45,6 +45,8 @@ const blogRoutes = require('./routes/blogRoutes');
 const chatRoutes = require("./routes/chatRoutes");
 const pushRoutes = require("./routes/pushRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const categoryRoutes = require('./routes/categoryRoutes');
+
 
 const http = require('http');
 const { Server } = require('socket.io');
@@ -99,7 +101,6 @@ app.use(
 app.use("/api", webhookRoute);
 
 // ✅ Body parsing & cookies
-app.use(bodyParser.json());
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -144,6 +145,8 @@ app.use("/api/blogs", blogRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/push", pushRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/categories", categoryRoutes);
+
 
 
 // ✅ Catch-all generic /api route MUST be last
