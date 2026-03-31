@@ -16,8 +16,11 @@ const {
   getRestockSubscribers,
   unsubscribeRestock,
   getBrandAccessories,
-  getAllBrands,
-  getLimitedEditionProducts
+  getLimitedEditionProducts,
+  updateBookingStatus,
+  updateBooking,
+  deleteBooking,
+  getAllBrands
 } = require("../controllers/productController");
 const {
   addToCart,
@@ -49,6 +52,9 @@ router.get("/getAllBrands", getAllBrands)                      // Fetch all prod
 router.post("/products", adminProtect, ImageUpload, addProduct);          // Add a new product (Admin Only)
 router.post("/createBooking", ImageUpload, addServiceForm); // Create service form
 router.get("/getBooking", getBookingService)
+router.put("/updateBookingStatus/:id", adminProtect, updateBookingStatus);
+router.put("/updateBooking/:id", adminProtect, updateBooking);
+router.delete("/deleteBooking/:id", adminProtect, deleteBooking);
 router.get("/getLimited", getLimitedEditionProducts);
 router.get("/products/home", productHome);                 // Products for homepage
 router.get('/productall', getAllProductwithSearch)

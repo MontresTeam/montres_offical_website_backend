@@ -108,3 +108,54 @@ exports.subscribeToNewsletter = async (req, res) => {
         });
     }
 };
+
+/**
+ * 📊 Get all newsletter subscribers
+ * Endpoint: GET /api/newsletter
+ */
+exports.getAllSubscribers = async (req, res) => {
+    try {
+        const subscribers = await Newsletter.find().sort({ subscribedAt: -1 });
+        res.status(200).json({
+            success: true,
+            count: subscribers.length,
+            data: subscribers,
+        });
+    } catch (error) {
+        console.error("Error fetching newsletter subscribers:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch newsletter subscribers.",
+        });
+    }
+};
+
+/**
+ * 🗑️ Delete a newsletter subscriber
+ * Endpoint: DELETE /api/newsletter/:id
+ */
+exports.deleteSubscriber = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const subscriber = await Newsletter.findByIdAndDelete(id);
+
+        if (!subscriber) {
+            return res.status(404).json({
+                success: false,
+                message: "Subscriber not found.",
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Subscriber removed successfully.",
+        });
+    } catch (error) {
+        console.error("Error deleting newsletter subscriber:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Failed to delete newsletter subscriber.",
+        });
+    }
+};
+
