@@ -30,7 +30,6 @@ const getAccessoriesProducts = async (req, res) => {
     // Base filter
     let filter = {
       category: "Accessories",
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     };
 
     // Published products (default = true)
@@ -211,7 +210,6 @@ const getProductsByAccessoriesCategory = async (req, res) => {
     const filter = {
       category: "Accessories",
       accessoryCategory: new RegExp(`^${normalized}$`, "i"), // case-insensitive
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     };
 
     // Pagination
@@ -297,7 +295,6 @@ const getAccessoryById = async (req, res) => {
         { brand: product.brand },
         { accessorySubCategory: product.accessorySubCategory },
       ],
-      $and: [{ $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }] }]
     })
       .limit(4)
       .select(

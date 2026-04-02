@@ -29,10 +29,9 @@ const getAllLeatherGoods = async (req, res) => {
       search
     } = req.query;
 
-    // ✅ Base filter - only leather goods and in-stock products
+    // ✅ Base filter - only leather goods
     let filter = {
       categorisOne: "leather",
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     };
 
     // ✅ Category filter (from URL params or query)
@@ -234,7 +233,6 @@ const getProductsByLeatherSubCategory = async (req, res) => {
     const filter = {
       leatherMainCategory: "Bag",
       subcategory: subCategory,
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     };
 
     // Pagination
@@ -641,7 +639,6 @@ const getLeatherBags = async (req, res) => {
     // Build filter object
     const filter = {
       leatherMainCategory: "Bag",
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     };
 
     // Price filter (using salePrice)

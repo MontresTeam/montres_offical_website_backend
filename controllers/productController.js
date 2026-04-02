@@ -1472,26 +1472,24 @@ const getAllProductwithSearch = async (req, res) => {
     const trimmed = search.trim();
 
     if (trimmed) {
-      // Primary: $text search — indexed, ranked by relevance score
-      const query = { ...SEARCH_STOCK_FILTER, $text: { $search: trimmed } };
-      const textResults = await Product.find(query, { score: { $meta: "textScore" } })
+      // Robust Search: Regex for brand, name, and model to handle partial matches and word boundaries correctly
+      const searchRegex = { $regex: trimmed, $options: "i" };
+      const query = {
+        ...SEARCH_STOCK_FILTER,
+        $or: [
+          { brand: searchRegex },
+          { name: searchRegex },
+          { model: searchRegex },
+          { referenceNumber: searchRegex },
+        ]
+      };
+
+      const results = await Product.find(query)
         .select(SEARCH_SELECT)
-        .sort({ score: { $meta: "textScore" } })
-        .limit(20)
+        .limit(1000)
         .lean();
 
-      if (textResults.length > 0) {
-        return res.json({ success: true, totalProducts: textResults.length, products: textResults });
-      }
-
-      // Fallback: Fuse.js fuzzy search — handles typos like "rolexx" → "Rolex"
-      const catalog = await Product.find(SEARCH_STOCK_FILTER)
-        .select(SEARCH_SELECT)
-        .lean();
-      const fuse = new Fuse(catalog, FUSE_OPTIONS);
-      const fuzzyResults = fuse.search(trimmed).slice(0, 20).map((r) => r.item);
-
-      return res.json({ success: true, totalProducts: fuzzyResults.length, products: fuzzyResults });
+      return res.json({ success: true, totalProducts: results.length, products: results });
     }
 
     // No search term — return full catalog for client-side search (Navbar preload)

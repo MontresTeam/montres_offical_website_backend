@@ -90,11 +90,11 @@ const updateHomeProducts = async (req, res) => {
 
 const getHomeProductsGrid = async (req, res) => {
   try {
-    const BASE_MATCH = { inStock: true, stockQuantity: { $gt: 0 } };
+    const BASE_MATCH = { published: true, inStock: true, stockQuantity: { $gt: 0 } };
 
     // ── Watches & Accessories: aggregation pipeline grouped by style
     const GROUPED_CATEGORIES = [
-      { title: "Watch", styleField: "watchStyle", limit: 1 },
+      { title: "Watch", styleField: "brand", limit: 1 },
       { title: "Accessories", styleField: "accessoryCategory", limit: 3 },
     ];
 
@@ -106,6 +106,7 @@ const getHomeProductsGrid = async (req, res) => {
           name: 1, brand: 1, regularPrice: 1, salePrice: 1,
           seoTitle: 1, seoDescription: 1, slug: 1,
           category: 1, leatherMainCategory: 1, subCategory: 1,
+          inStock: 1, stockQuantity: 1, published: 1,
           _styleValue: `$${styleField}`,
           image: {
             $let: {
@@ -173,6 +174,9 @@ const getHomeProductsGrid = async (req, res) => {
               in: { $ifNull: ["$$mainImg.url", "$$firstImg.url"] },
             },
           },
+          inStock: 1,
+          stockQuantity: 1,
+          published: 1,
         },
       },
     ];
@@ -197,9 +201,14 @@ const getHomeProductsGrid = async (req, res) => {
     const [leatherGoodsProducts, leatherBagsProducts, ...groupedResults] = await Promise.all([
       Product.aggregate(flatLeatherPipeline("Leather Goods")),
       Product.aggregate(flatLeatherPipeline("Leather Bags")),
-      ...GROUPED_CATEGORIES.map(({ styleField, limit }) =>
-        Product.aggregate(buildPipeline(styleField, { $exists: true, $ne: null }, limit))
-      ),
+      ...GROUPED_CATEGORIES.map(({ title, styleField, limit }) => {
+        let match = { $exists: true, $ne: null };
+        // If it's the Watch section, only get Vintage watches as requested
+        if (title === "Watch") {
+          match = { $exists: true, $ne: null };
+        }
+        return Product.aggregate(buildPipeline(styleField, match, limit));
+      }),
     ]);
 
     const homeProducts = [
@@ -439,6 +448,25 @@ const getTrustedProduct = async (req, res) => {
 };
 
 
+// ─── Dedicated: Vintage & Luxury Watches for Homepage ────────────────────────
+const getWatchProducts = async (req, res) => {
+  try {
+    const watches = await Product.find({
+      watchStyle: { $in: ["luxury watch", "Luxury Watch", "vintage watch", "Vintage Watch"] },
+      inStock: true,
+      stockQuantity: { $gt: 0 },
+    })
+      .sort({ createdAt: -1 })
+      .limit(40)
+      .lean();
+
+    res.status(200).json({ success: true, products: watches });
+  } catch (error) {
+    console.error("Watch Products Error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 module.exports = {
   addHomeProductsGrid,
   updateHomeProducts,
@@ -447,4 +475,5 @@ module.exports = {
   updateBrandNewProducts,
   updateTrustedProducts,
   getTrustedProduct,
+  getWatchProducts,
 };

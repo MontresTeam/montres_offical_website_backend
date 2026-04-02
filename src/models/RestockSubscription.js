@@ -73,7 +73,7 @@ const restockSubscriptionSchema = new mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model(
+module.exports = mongoose.models.RestockSubscription || mongoose.model(
   "RestockSubscription",
   restockSubscriptionSchema
 );

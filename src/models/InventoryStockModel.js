@@ -75,5 +75,5 @@ const InventoryStockSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 
-module.exports = mongoose.model("InventoryStock", InventoryStockSchema)
+module.exports = mongoose.models.InventoryStock || mongoose.model("InventoryStock", InventoryStockSchema);
 
