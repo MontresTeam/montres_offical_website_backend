@@ -23,11 +23,14 @@ const SEARCH_SELECT_FIELDS = [
   "images",
   "leatherMainCategory",
   "subcategory",
+  "subCategory",
   "inStock",
   "stockQuantity",
   "accessorySubCategory",
   "watchStyle",
   "leatherSubCategory",
+  "condition",
+  "status",
 ];
 
 const SEARCH_SELECT = SEARCH_SELECT_FIELDS.join(" ");

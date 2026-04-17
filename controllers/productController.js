@@ -604,6 +604,25 @@ const getProducts = async (req, res) => {
 };
 
 
+const getAllProducts = async (req, res) => {
+  try {
+    const products = await Product.find().sort({ createdAt: -1 }).lean();
+    res.status(200).json({
+      success: true,
+      count: products.length,
+      products,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching all products from database:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching all products from database",
+      error: error.message,
+    });
+  }
+};
+
+
 const getAllBrands = async (req, res) => {
   try {
     const { category } = req.query;
@@ -688,21 +707,23 @@ const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // ✅ REQUIRED FIX
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        message: "❌ Invalid product ID",
-      });
+    let query;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      query = { _id: id };
+    } else {
+      // Replace hyphens with a regex that matches spaces or hyphens
+      const regexStr = id.replace(/-+/g, '[\\s-]+');
+      query = { name: { $regex: new RegExp(`^${regexStr}$`, 'i') } };
     }
 
-    const product = await Product.findById(id)
+    const product = await Product.findOne(query)
       .select(
         "brand model name sku referenceNumber serialNumber watchType watchStyle " +
         "scopeOfDelivery scopeOfDeliveryWatch productionYear gender movement " +
         "dialColor caseMaterial strapMaterial strapColor dialNumerals " +
         "salePrice regularPrice stockQuantity taxStatus strapSize caseSize " +
         "includedAccessories condition itemCondition category description " +
-        "visibility published featured inStock badges images createdAt updatedAt " +
+        "slug visibility published featured inStock badges images createdAt updatedAt " +
         "waterResistance complications crystal limitedEdition " +
         "make_offer_enabled minimum_offer_type minimum_offer_percentage minimum_offer_amount " +
         "suggested_offer_percentages acceptance_probability_rules auto_counter_offer_threshold " +
@@ -1471,29 +1492,65 @@ const getAllProductwithSearch = async (req, res) => {
     const { search = "" } = req.query;
     const trimmed = search.trim();
 
+    // Use a base filter that only requires products to be published, 
+    // satisfying the user's request to see "full items" (even if out of stock).
+    const baseFilter = { published: true };
+
     if (trimmed) {
-      // Robust Search: Regex for brand, name, and model to handle partial matches and word boundaries correctly
-      const searchRegex = { $regex: trimmed, $options: "i" };
+      // Multi-word Search: Split query into words and ensure products match ALL words (AND logic)
+      // Words can match across brand, name, model, reference number, or category.
+      const words = trimmed.split(/\s+/).filter(word => word.length > 0);
+
+      const andConditions = words.map(word => {
+        const wordRegex = new RegExp(word, "i");
+        return {
+          $or: [
+            { brand: wordRegex },
+            { name: wordRegex },
+            { model: wordRegex },
+            { referenceNumber: wordRegex },
+            { category: wordRegex },
+            { watchStyle: wordRegex },
+            { watchType: wordRegex }
+          ]
+        };
+      });
+
       const query = {
-        ...SEARCH_STOCK_FILTER,
-        $or: [
-          { brand: searchRegex },
-          { name: searchRegex },
-          { model: searchRegex },
-          { referenceNumber: searchRegex },
-        ]
+        ...baseFilter,
+        $and: andConditions
       };
 
-      const results = await Product.find(query)
+      const items = await Product.find({ ...baseFilter, $and: andConditions })
         .select(SEARCH_SELECT)
         .limit(1000)
         .lean();
 
+      // 2. Fuzzy Search (Fuse.js) — Supplemental for typos/partial matches
+      // Fetch more items to run fuzzy search on if regex results are thin
+      let results = items;
+      if (items.length < 20) {
+        // Fetch published items pool for fuzzy matching
+        const pool = await Product.find(baseFilter).select(SEARCH_SELECT).lean();
+        const fuse = new Fuse(pool, FUSE_OPTIONS);
+        const fuzzyHits = fuse.search(trimmed);
+
+        // Merge hits with primary results
+        const primaryIds = new Set(items.map(i => i._id.toString()));
+        const extras = fuzzyHits
+          .filter(h => !primaryIds.has(h.item._id?.toString()) && h.score < 0.45)
+          .slice(0, 50)
+          .map(h => h.item);
+
+        results = [...items, ...extras];
+      }
+
       return res.json({ success: true, totalProducts: results.length, products: results });
+
     }
 
     // No search term — return full catalog for client-side search (Navbar preload)
-    const products = await Product.find(SEARCH_STOCK_FILTER)
+    const products = await Product.find(baseFilter)
       .select(SEARCH_SELECT)
       .sort({ createdAt: -1 })
       .lean();
@@ -1501,6 +1558,7 @@ const getAllProductwithSearch = async (req, res) => {
     return res.json({ success: true, totalProducts: products.length, products });
   } catch (error) {
     console.error("Product fetch error: ", error);
+
     res.status(500).json({
       success: false,
       message: "Error fetching products",
@@ -1728,5 +1786,6 @@ module.exports = {
   getLimitedEditionProducts,
   updateBookingStatus,
   updateBooking,
-  deleteBooking
+  deleteBooking,
+  getAllProducts
 };
