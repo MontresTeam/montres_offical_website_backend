@@ -242,6 +242,7 @@ const productSchema = new mongoose.Schema(
     brand: { type: String },
     model: { type: String },
     sku: { type: String },
+    slug: { type: String, unique: true, index: true },
 
     // ────────────── CATEGORY INFORMATION ──────────────
     category: {
@@ -797,6 +798,26 @@ productSchema.pre("save", async function () {
     } else if (nameParts.length > 0) {
       this.name = nameParts.join(" ");
     }
+  }
+
+  // Generate slug automatically
+  if (this.isModified('brand') || this.isModified('name') || !this.slug) {
+    const slugBase = `${this.brand || ''} ${this.name || ''}`.trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)+/g, '');
+    
+    // Ensure uniqueness internally, if a product with the same slug exists, append internal db ID fragment
+    let targetSlug = slugBase;
+    try {
+      const existing = await this.constructor.findOne({ slug: targetSlug, _id: { $ne: this._id } });
+      if (existing) {
+        targetSlug = `${slugBase}-${this._id.toString().substring(18)}`; // append last 6 chars of ID for internal uniqueness
+      }
+    } catch (e) {
+      console.error("Slug generation error", e);
+    }
+    this.slug = targetSlug;
   }
 
   // Ensure sale price is set if not provided

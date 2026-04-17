@@ -135,12 +135,12 @@ const getProducts = async (req, res) => {
 
     // ✅ Convert pagination params
     const pageNum = Math.max(1, parseInt(page, 10));
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10)));
+    // If searching, allow a much larger limit for "View All" scenarios, otherwise use provided or default limit
+    const limitNum = search ? 1000 : Math.min(200, Math.max(1, parseInt(limit, 10)));
 
-    // ✅ Base Filter - only published and in-stock products
+    // ✅ Base Filter - only published products
     const filterQuery = {
       published: true,
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     };
     const andConditions = [];
 
@@ -767,7 +767,6 @@ const getBrandWatches = async (req, res) => {
     const products = await Product.find({
       brand: { $regex: new RegExp(`^${brand}$`, "i") }, // case-insensitive
       category: "Watch", // only watches
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     });
 
     if (!products || products.length === 0) {
@@ -801,7 +800,6 @@ const getBrandBags = async (req, res) => {
     const products = await Product.find({
       brand: { $regex: brandParam, $options: "i" }, // case-insensitive match
       leatherMainCategory: "Bag", // Only bags
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     });
 
     if (!products || products.length === 0) {
@@ -1139,7 +1137,6 @@ const SEARCH_SELECT =
 
 const SEARCH_STOCK_FILTER = {
   published: true,
-  $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }],
 };
 
 const FUSE_OPTIONS = {
@@ -1160,26 +1157,26 @@ const getAllProductwithSearch = async (req, res) => {
     const trimmed = search.trim();
 
     if (trimmed) {
-      // Primary: $text search — indexed, ranked by relevance score
-      const query = { ...SEARCH_STOCK_FILTER, $text: { $search: trimmed } };
-      const textResults = await Product.find(query, { score: { $meta: "textScore" } })
+      // Robust Search: Regex for brand, name, and model to handle partial matches and word boundaries correctly
+      const searchRegex = { $regex: trimmed, $options: "i" };
+      const query = {
+        ...SEARCH_STOCK_FILTER,
+        $or: [
+          { brand: searchRegex },
+          { name: searchRegex },
+          { model: searchRegex },
+          { referenceNumber: searchRegex },
+        ]
+      };
+
+      const results = await Product.find(query)
         .select(SEARCH_SELECT)
-        .sort({ score: { $meta: "textScore" } })
-        .limit(20)
+        .limit(1000)
         .lean();
+      
+      console.log(`[BackendAllDebug] search for '${trimmed}' found: ${results.length}`);
 
-      if (textResults.length > 0) {
-        return res.json({ success: true, totalProducts: textResults.length, products: textResults });
-      }
-
-      // Fallback: Fuse.js fuzzy search — handles typos like "rolexx" → "Rolex"
-      const catalog = await Product.find(SEARCH_STOCK_FILTER)
-        .select(SEARCH_SELECT)
-        .lean();
-      const fuse = new Fuse(catalog, FUSE_OPTIONS);
-      const fuzzyResults = fuse.search(trimmed).slice(0, 20).map((r) => r.item);
-
-      return res.json({ success: true, totalProducts: fuzzyResults.length, products: fuzzyResults });
+      return res.json({ success: true, totalProducts: results.length, products: results });
     }
 
     // No search term — return full catalog for client-side search (Navbar preload)

@@ -204,6 +204,19 @@ const getFacetedFilters = async (req, res) => {
             { $group: { _id: "$condition", count: { $sum: 1 } } },
             { $match: { _id: { $ne: null, $ne: "" } } }
           ],
+          subCategories: [
+            { $unwind: { path: "$subcategory", preserveNullAndEmptyArrays: false } },
+            { $group: { _id: "$subcategory", count: { $sum: 1 } } },
+            { $match: { _id: { $ne: null, $ne: "" } } }
+          ],
+          colors: [
+            { $group: { _id: { $ifNull: ["$color", "$dialColor"] }, count: { $sum: 1 } } },
+            { $match: { _id: { $ne: null, $ne: "" } } }
+          ],
+          materials: [
+            { $group: { _id: { $ifNull: ["$caseMaterial", "$leatherMaterial"] }, count: { $sum: 1 } } },
+            { $match: { _id: { $ne: null, $ne: "" } } }
+          ],
           genders: [
             { $group: { _id: "$gender", count: { $sum: 1 } } },
             { $match: { _id: { $ne: null, $ne: "" } } }
@@ -241,6 +254,9 @@ const getFacetedFilters = async (req, res) => {
         dialColors: formatFacet(result.dialColors),
         strapMaterials: formatFacet(result.strapMaterials),
         conditions: formatFacet(result.conditions),
+        subCategories: formatFacet(result.subCategories),
+        colors: formatFacet(result.colors),
+        materials: formatFacet(result.materials),
         genders: formatFacet(result.genders),
         availabilities: formatFacet(result.availabilities),
       }
@@ -249,5 +265,6 @@ const getFacetedFilters = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 module.exports = { filerDatareferenceNumber, getWatchFilters, getBrandFilters, getFacetedFilters };

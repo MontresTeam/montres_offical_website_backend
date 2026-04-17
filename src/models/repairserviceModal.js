@@ -78,4 +78,4 @@ const watchServiceSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("WatchService", watchServiceSchema);
+module.exports = mongoose.models.WatchService || mongoose.model("WatchService", watchServiceSchema);

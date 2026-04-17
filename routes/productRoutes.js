@@ -16,8 +16,12 @@ const {
   getRestockSubscribers,
   unsubscribeRestock,
   getBrandAccessories,
+  getLimitedEditionProducts,
+  updateBookingStatus,
+  updateBooking,
+  deleteBooking,
   getAllBrands,
-  getLimitedEditionProducts
+  getAllProducts
 } = require("../controllers/productController");
 const {
   addToCart,
@@ -44,14 +48,19 @@ const { protect, adminProtect } = require("../middlewares/authMiddleware");
 const router = express.Router();
 
 /* ----------------- Product Routes ----------------- */
-router.get("/products", getProducts);
+router.get("/", getProducts);
+router.get("/productAll", getAllProductwithSearch);
 router.get("/getAllBrands", getAllBrands)                      // Fetch all products
 router.post("/products", adminProtect, ImageUpload, addProduct);          // Add a new product (Admin Only)
 router.post("/createBooking", ImageUpload, addServiceForm); // Create service form
 router.get("/getBooking", getBookingService)
+router.put("/updateBookingStatus/:id", adminProtect, updateBookingStatus);
+router.put("/updateBooking/:id", adminProtect, updateBooking);
+router.delete("/deleteBooking/:id", adminProtect, deleteBooking);
 router.get("/getLimited", getLimitedEditionProducts);
 router.get("/products/home", productHome);                 // Products for homepage
 router.get('/productall', getAllProductwithSearch)
+router.get("/getAllDatabaseProducts", getAllProducts);      // Fetch all products from database (no filter)
 /* ----------------- Cart Routes ----------------- */
 router.post("/cart/add", protect, addToCart);
 router.get('/cart', protect, getCart)            // Add to cart

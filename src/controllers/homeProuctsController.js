@@ -123,9 +123,16 @@ const getHomeProductsGrid = async (req, res) => {
 
         const productsInCategory = await Product.find(filter).sort({ createdAt: -1 });
 
+        // For watches, only include luxury and vintage styles
+        const WATCH_STYLES = ["luxury watch", "vintage watch"];
+
         const styles = [
           ...new Set(productsInCategory.flatMap(p => p[cat.styleField]).filter(Boolean))
-        ];
+        ].filter(style =>
+          cat.title === "Watch"
+            ? WATCH_STYLES.includes((style || "").toLowerCase())
+            : true
+        );
 
         const groupedProducts = styles.map(style => {
           const matched = productsInCategory.filter(p => {
@@ -134,7 +141,8 @@ const getHomeProductsGrid = async (req, res) => {
           });
           return {
             subCategory: style,
-            products: cat.title === "Watch" ? matched.slice(0, 1) : matched.slice(0, 3),
+            // Return up to 20 watches per style, 3 accessories per style
+            products: cat.title === "Watch" ? matched.slice(0, 20) : matched.slice(0, 3),
           };
         });
 
@@ -363,6 +371,74 @@ const getTrustedProduct = async (req, res) => {
 };
 
 
+// ─── Dedicated: one product per featured brand (Seiko / Oris / Rado) ─────────
+const FEATURED_BRANDS = ["Seiko", "Oris", "Rado"];
+
+const getBrandFeatures = async (req, res) => {
+  try {
+    const projection = { name: 1, brand: 1, images: 1, image: 1, published: 1, inStock: 1, stockQuantity: 1 };
+
+    const results = await Promise.all(
+      FEATURED_BRANDS.map(async (brand) => {
+        const regex = new RegExp(`^${brand}$`, "i");
+
+        // 1️⃣ Prefer in-stock product
+        let product = await Product.findOne(
+          { brand: { $regex: regex }, inStock: true, stockQuantity: { $gt: 0 } },
+          projection
+        ).sort({ createdAt: -1 }).lean();
+
+        // 2️⃣ Fallback: any product for this brand regardless of stock
+        if (!product) {
+          product = await Product.findOne(
+            { brand: { $regex: regex } },
+            projection
+          ).sort({ createdAt: -1 }).lean();
+        }
+
+        if (!product) return null;
+
+        // Resolve image URL — schema uses `images:[{url,alt}]` or legacy `image` string
+        const imageUrl =
+          (product.images && product.images.length > 0 && product.images[0].url)
+          || product.image
+          || null;
+
+        return {
+          brand,
+          product: { ...product, resolvedImage: imageUrl },
+        };
+      })
+    );
+
+    const features = results.filter(Boolean);
+
+    res.status(200).json({ success: true, features });
+  } catch (error) {
+    console.error("Brand Features Error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ─── Dedicated: Vintage & Luxury Watches for Homepage ───────────────────────
+const getWatchProducts = async (req, res) => {
+  try {
+    const watches = await Product.find({
+      watchStyle: { $in: ["luxury watch", "Luxury Watch", "vintage watch", "Vintage Watch"] },
+      inStock: true,
+      stockQuantity: { $gt: 0 },
+    })
+      .sort({ createdAt: -1 })
+      .limit(40)
+      .lean();
+
+    res.status(200).json({ success: true, products: watches });
+  } catch (error) {
+    console.error("Watch Products Error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 module.exports = {
   addHomeProductsGrid,
   updateHomeProducts,
@@ -371,4 +447,6 @@ module.exports = {
   updateBrandNewProducts,
   updateTrustedProducts,
   getTrustedProduct,
+  getWatchProducts,
+  getBrandFeatures,
 };

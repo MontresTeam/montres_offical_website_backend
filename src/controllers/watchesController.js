@@ -31,7 +31,6 @@ const getAllWatches = async (req, res) => {
     // Base filter: only watches
     let filter = {
       category: "Watch",
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     };
 
     // Build filter object dynamically
@@ -151,7 +150,6 @@ const getWatchesByStyle = async (req, res) => {
     // Base filter: only watches
     let filter = {
       category: "Watch",
-      $or: [{ stockQuantity: { $gt: 0 } }, { inStock: true }]
     };
 
     // Filter by watchStyle if provided and not "all"

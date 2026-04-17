@@ -946,4 +946,4 @@ productSchema.index(
   }
 );
 
-module.exports = mongoose.model("Product", productSchema, "products");
+module.exports = mongoose.models.Product || mongoose.model("Product", productSchema, "products");
