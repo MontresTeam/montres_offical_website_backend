@@ -46,6 +46,7 @@ const chatRoutes = require("./routes/chatRoutes");
 const pushRoutes = require("./routes/pushRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const categoryRoutes = require('./routes/categoryRoutes');
+const engagementRoutes = require('./routes/engagementRoutes');
 
 
 const http = require('http');
@@ -146,6 +147,7 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/push", pushRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/engagement", engagementRoutes);
 
 
 

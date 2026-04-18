@@ -21,7 +21,8 @@ const {
   updateBooking,
   deleteBooking,
   getAllBrands,
-  getAllProducts
+  getAllProducts,
+  getProductBySlug
 } = require("../controllers/productController");
 const {
   addToCart,
@@ -100,6 +101,7 @@ router.get('/brand/:brand/watches', getBrandWatches);
 router.get("/brand/:brand/handbags", getBrandBags);
 router.get("/brand/:brand/accessories", getBrandAccessories)
 
+router.get("/slug/:slug", getProductBySlug);
 router.get("/:id", getProductById);
 /* ----------------- Simillar product ----------------- */
 router.get("/:id/similar", SimilarProduct);

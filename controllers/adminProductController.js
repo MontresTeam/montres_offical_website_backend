@@ -140,6 +140,7 @@ const addProduct = async (req, res) => {
       limitedEdition: parseBoolean(productData.limitedEdition),
 
       productionYear: productionYearValue,
+      deliveryDays: parseIntNum(productData.deliveryDays) || 3,
       approximateYear: parseBoolean(productData.approximateYear),
       unknownYear: parseBoolean(productData.unknownYear),
 
@@ -306,6 +307,9 @@ const updateProduct = async (req, res) => {
       }),
       ...(req.body.unknownYear !== undefined && {
         unknownYear: parseBoolean(req.body.unknownYear),
+      }),
+      ...(req.body.deliveryDays !== undefined && {
+        deliveryDays: parseIntNum(req.body.deliveryDays),
       }),
       ...(req.body.gender && { gender: req.body.gender }),
       ...(req.body.movement && { movement: req.body.movement }),

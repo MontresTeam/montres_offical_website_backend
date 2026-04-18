@@ -771,6 +771,84 @@ const getProductById = async (req, res) => {
   }
 };
 
+const getProductBySlug = async (req, res) => {
+  try {
+    const { slug } = req.params;
+
+    // 1. Try finding by the 'slug' field exactly
+    let product = await Product.findOne({
+      slug: slug,
+      published: true
+    }).select("-__v").lean();
+
+    // 2. Fallback: Search by name/model using a flexible regex
+    if (!product) {
+      // Create a pattern that matches the slug parts with spaces or hyphens between them
+      const items = slug.split('-').filter(Boolean);
+      const pattern = items.join('[\\s-]+');
+      
+      product = await Product.findOne({
+        $or: [
+          { name: { $regex: new RegExp(`^${pattern}`, 'i') } },
+          { model: { $regex: new RegExp(`^${pattern}`, 'i') } },
+          { slug: { $regex: new RegExp(`^${slug}`, 'i') } } // partial slug match
+        ],
+        published: true
+      }).select("-__v").lean();
+    }
+
+    // 3. Final Fallback: if slug looks like a SKU or ID, try those too
+    if (!product && slug.length > 5) {
+      product = await Product.findOne({
+        $or: [
+          { sku: { $regex: new RegExp(`^${slug}`, 'i') } },
+          { referenceNumber: { $regex: new RegExp(`^${slug}`, 'i') } }
+        ],
+        published: true
+      }).select("-__v").lean();
+    }
+
+    if (!product) {
+      return res.status(404).json({
+        message: "❌ Product not found by slug or name fallback",
+      });
+    }
+
+    // Format consistent with getProductById
+    const formattedProduct = {
+      ...product,
+      brand: product.brand || "",
+      category: product.category || "",
+      image:
+        product.images?.find((img) => img.type === "main")?.url ||
+        product.images?.[0]?.url ||
+        "",
+      available: product.stockQuantity > 0 || product.inStock,
+      discount:
+        product.regularPrice &&
+          product.salePrice &&
+          product.regularPrice > product.salePrice
+          ? Math.round(
+            ((product.regularPrice - product.salePrice) /
+              product.regularPrice) *
+            100
+          )
+          : 0,
+      isOnSale:
+        product.regularPrice &&
+        product.salePrice &&
+        product.regularPrice > product.salePrice,
+    };
+
+    return res.status(200).json({ product: formattedProduct });
+  } catch (err) {
+    console.error("❌ Error fetching product by slug:", err);
+    return res.status(500).json({
+      message: "❌ Error fetching product",
+    });
+  }
+};
+
 // Add Product
 const addProduct = async (req, res) => {
   try {
@@ -1787,5 +1865,6 @@ module.exports = {
   updateBookingStatus,
   updateBooking,
   deleteBooking,
-  getAllProducts
+  getAllProducts,
+  getProductBySlug
 };

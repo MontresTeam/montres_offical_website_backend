@@ -487,28 +487,97 @@ const updateLeathergoods = async (req, res) => {
     if (body.interiorMaterial) updateData.interiorMaterial = body.interiorMaterial;
     if (body.hardwareColor) updateData.hardwareColor = body.hardwareColor;
 
-    // Mapping for array fields
-    if (body.leatherAccessories) updateData.leatherAccessories = body.leatherAccessories;
-    if (body.scopeOfDelivery) updateData.scopeOfDelivery = body.scopeOfDelivery;
-
     // Pricing
-    if (body.retailPrice !== undefined) updateData.regularPrice = parseFloat(body.retailPrice);
-    if (body.sellingPrice !== undefined) updateData.salePrice = parseFloat(body.sellingPrice);
+    if (body.retailPrice !== undefined && body.retailPrice !== "") {
+      const price = parseFloat(body.retailPrice);
+      updateData.regularPrice = isNaN(price) ? 0 : price;
+    }
+    if (body.sellingPrice !== undefined && body.sellingPrice !== "") {
+      const price = parseFloat(body.sellingPrice);
+      updateData.salePrice = isNaN(price) ? 0 : price;
+    }
 
-    // Direct mappings
-    const directFields = [
+    // ── Typed direct field mappings ──────────────────────────────────────────
+
+    // String fields – copy as-is
+    const stringFields = [
       "modelCode", "additionalTitle", "serialNumber", "sku", "productionYear",
-      "approximateYear", "unknownYear", "gender", "condition", "itemCondition",
-      "conditionNotes", "strapLength", "taxStatus", "stockQuantity", "inStock",
-      "badges", "images", "seoTitle", "seoDescription", "seoKeywords", "description"
+      "gender", "condition", "itemCondition", "conditionNotes",
+      "taxStatus", "seoTitle", "seoDescription", "description"
     ];
-
-    directFields.forEach(field => {
+    stringFields.forEach(field => {
       if (body[field] !== undefined) updateData[field] = body[field];
     });
 
+    // Boolean fields – coerce "true" / "false" strings from FormData
+    const parseBool = (val, def = false) => {
+      if (val === true  || val === "true")  return true;
+      if (val === false || val === "false") return false;
+      return def;
+    };
+    if (body.approximateYear !== undefined) updateData.approximateYear = parseBool(body.approximateYear);
+    if (body.unknownYear     !== undefined) updateData.unknownYear     = parseBool(body.unknownYear);
+
+    // Numeric fields – always parse
+    if (body.strapLength !== undefined && body.strapLength !== "") {
+      updateData.strapLength = parseFloat(body.strapLength) || 0;
+    }
+
+    // stockQuantity → also auto-derive inStock
+    if (body.stockQuantity !== undefined) {
+      const qty = parseInt(body.stockQuantity, 10);
+      updateData.stockQuantity = isNaN(qty) ? 0 : qty;
+      // Auto-sync inStock unless the caller explicitly overrides it below
+      updateData.inStock = updateData.stockQuantity > 0;
+    }
+    // Allow caller to explicitly override inStock even when stockQuantity isn't sent
+    if (body.inStock !== undefined && body.stockQuantity === undefined) {
+      updateData.inStock = parseBool(body.inStock, true);
+    }
+
+    // Array fields
+    const toArray = (val) => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val;
+      return [val];
+    };
+    if (body.badges      !== undefined) updateData.badges      = toArray(body.badges);
+    if (body.seoKeywords !== undefined) updateData.seoKeywords = toArray(body.seoKeywords);
+
+    // ── Image handling ───────────────────────────────────────────────────────
+    // Priority: newly uploaded (via Cloudinary multer) > explicit body.images > keep existing
+    // The multer middleware puts Cloudinary results in req.body.uploadedImages
+    const newlyUploaded = req.body.uploadedImages
+      ? (Array.isArray(req.body.uploadedImages) ? req.body.uploadedImages : [req.body.uploadedImages])
+      : [];
+
+    // existingImages is sent as JSON string from the frontend
+    let existingImages = [];
+    if (body.existingImages) {
+      try {
+        existingImages = typeof body.existingImages === "string"
+          ? JSON.parse(body.existingImages)
+          : body.existingImages;
+      } catch (e) {
+        console.warn("Could not parse existingImages:", body.existingImages);
+      }
+    }
+
+    if (newlyUploaded.length > 0) {
+      // New uploads: prepend them in front of retained existing images
+      updateData.images = [...newlyUploaded, ...existingImages];
+    } else if (existingImages.length > 0) {
+      // No new uploads but existing images sent → preserve them
+      updateData.images = existingImages;
+    }
+    // If neither sent, leave images field untouched in DB (no updateData.images key)
+
+    // Also ensure leatherAccessories / scopeOfDelivery are always arrays
+    if (body.leatherAccessories) updateData.leatherAccessories = toArray(body.leatherAccessories);
+    if (body.scopeOfDelivery)    updateData.scopeOfDelivery    = toArray(body.scopeOfDelivery);
+
     // Handle unknown year
-    if (updateData.unknownYear === true || updateData.unknownYear === "true") {
+    if (updateData.unknownYear === true) {
       updateData.productionYear = "unknown";
       updateData.approximateYear = false;
     }
