@@ -89,7 +89,9 @@ const MOVEMENTS = [
 
 const COLORS = [
   "Black", "White", "Gold/Silver", "Silver", "Gold", "Rose Gold", "Blue", "Green", "Red",
-  "Brown", "Gray", "Yellow", "Orange", "Purple", "Pink", "Champagne"
+  "Brown", "Gray", "Yellow", "Orange", "Purple", "Pink", "Champagne",
+  // Leather goods & accessory colors
+  "Multi-color", "Transparent", "Metallic", "Chrome", "Gunmetal", "Beige"
 ];
 
 const MATERIALS = [

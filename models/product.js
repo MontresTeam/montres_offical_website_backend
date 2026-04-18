@@ -279,6 +279,10 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    deliveryDays: {
+      type: Number,
+      default: 3,
+    },
 
     stockQuantity: {
       type: Number,
@@ -608,6 +612,18 @@ const productSchema = new mongoose.Schema(
       ],
       index: true,
     },
+    // ==================== ENGAGEMENT FIELDS ====================
+    views_count: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    watchers_count: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     // ==================== LEGACY / EXTRA FIELDS ====================
     categorisOne: { type: String, index: true },
     subcategory: { type: [String], index: true },
@@ -802,8 +818,16 @@ productSchema.pre("save", async function () {
 
   // Generate slug automatically
   if (this.isModified('brand') || this.isModified('name') || !this.slug) {
-    const slugBase = `${this.brand || ''} ${this.name || ''}`.trim()
-      .toLowerCase()
+    const brandStr = (this.brand || "").trim().toLowerCase();
+    const nameStr = (this.name || "").trim().toLowerCase();
+    
+    // If name already starts with brand, don't prepend it again
+    let combined = nameStr;
+    if (brandStr && !nameStr.startsWith(brandStr)) {
+      combined = `${brandStr} ${nameStr}`;
+    }
+
+    const slugBase = combined
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)+/g, '');
     
