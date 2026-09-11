@@ -1,4 +1,14 @@
-const mongoose = require("mongoose");
+﻿const mongoose = require("mongoose");
+
+const replySchema = new mongoose.Schema(
+  {
+    replyMessage: { type: String, required: true },
+    senderEmail: { type: String, default: "" },
+    senderName: { type: String, default: "Montres Support" },
+    sentAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
 
 const contactFormSchema = new mongoose.Schema(
   {
@@ -28,9 +38,7 @@ const contactFormSchema = new mongoose.Schema(
 
     country: {
       type: String,
-      required: [true, "Country is required"],
       default: "AE",
-      enum: ["AE", "SA", "KW", "QA", "BH", "OM", "US", "UK", "CA"],
     },
 
     companyName: {
@@ -41,15 +49,7 @@ const contactFormSchema = new mongoose.Schema(
 
     subject: {
       type: String,
-      required: [true, "Subject is required"],
-      enum: [
-        "Product Information",
-        "Order Support",
-        "Return Request",
-        "Billing Question",
-        "Partnership Inquiry",
-        "Other",
-      ],
+      default: "General Inquiry",
     },
 
     message: {
@@ -59,11 +59,18 @@ const contactFormSchema = new mongoose.Schema(
       maxlength: [2000, "Message cannot exceed 2000 characters"],
     },
 
-    // ✅ OPTIONAL attachment
     attachment: {
       type: String,
-      default: "", // ← important
+      default: "",
     },
+
+    status: {
+      type: String,
+      enum: ["open", "pending", "resolved", "closed"],
+      default: "open",
+    },
+
+    replies: [replySchema],
   },
   { timestamps: true }
 );

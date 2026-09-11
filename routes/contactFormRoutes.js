@@ -1,26 +1,26 @@
-const express = require("express");
+﻿const express = require("express");
 const router = express.Router();
 const {
   submitContactForm,
   getAllContacts,
+  getContactById,
   deleteContact,
+  replyToContact,
 } = require("../controllers/contactFormController");
 const imageUpload = require("../config/multerConfig");
 
-
 const { adminProtect } = require("../middlewares/authMiddleware");
 
-// 📩 Submit contact form (with S3 upload) - Public
+// Submit contact form (with S3 upload) - Public
 router.post("/submit", imageUpload, submitContactForm);
 
-// 📜 Get all contact submissions - Admin only
+// Admin protected routes
 router.get("/", adminProtect, getAllContacts);
-
-const { getContactById } = require("../controllers/contactFormController");
-// 📜 Get single contact submission - Admin only
 router.get("/:id", adminProtect, getContactById);
-
-// 🗑 Delete contact - Admin only
 router.delete("/:id", adminProtect, deleteContact);
+
+// Reply to contact / ticket via email
+router.post("/:id/reply", adminProtect, replyToContact);
+router.post("/reply/:id", adminProtect, replyToContact);
 
 module.exports = router;
