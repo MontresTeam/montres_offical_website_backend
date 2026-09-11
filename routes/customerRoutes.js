@@ -1,4 +1,4 @@
-const express = require("express");
+﻿const express = require("express");
 const router = express.Router();
 const {
   createCustomer,
@@ -16,6 +16,7 @@ router.use(adminProtect);
 // Routes
 router.post("/create", createCustomer); // Create user
 router.get("/All", getAllCustomers); // Get all users
+router.get("/All/:id", getCustomerById); // Support alias
 router.get("/:id", getCustomerById); // Get user by ID
 router.put("/:id", updateCustomer); // Update user
 router.delete("/:id", deleteCustomer); // Delete user
