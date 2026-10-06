@@ -10,6 +10,7 @@ require("dotenv").config();
 const mongoose = require("mongoose");
 const { syncTabbyOrders } = require("../controllers/tabbyController");
 const { syncStripeOrders } = require("../controllers/orderController");
+const { syncTamaraOrders } = require("../controllers/tamaraController");
 const Order = require("../models/OrderModel");
 
 async function runFullSync() {
@@ -24,12 +25,15 @@ async function runFullSync() {
   const stripeRes = await syncStripeOrders();
   console.log("Stripe sync result:", stripeRes);
 
-  console.log("\n--- Running Tamara Expired Check ---");
+  console.log("\n--- Running Tamara Reconciliation ---");
+  const tamaraRes = await syncTamaraOrders();
+  console.log("Tamara sync result:", tamaraRes);
+
   const tamaraUpdated = await Order.updateMany(
     {
       paymentMethod: "tamara",
       paymentStatus: "pending",
-      createdAt: { $lt: new Date(Date.now() - 2 * 60 * 60 * 1000) }
+      createdAt: { $lt: new Date(Date.now() - 6 * 60 * 60 * 1000) }
     },
     {
       $set: { paymentStatus: "failed", orderStatus: "Cancelled" }
