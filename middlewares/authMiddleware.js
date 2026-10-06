@@ -27,9 +27,11 @@ exports.optionalProtect = (req, res, next) => {
       const decodedAdmin = jwt.verify(adminToken, process.env.ADMIN_JWT_SECRET);
       if (decodedAdmin.isAdmin && decodedAdmin.role) {
         req.admin = {
-          id: decodedAdmin.id,
+          id: decodedAdmin.id || decodedAdmin._id,
+          _id: decodedAdmin._id || decodedAdmin.id,
           username: decodedAdmin.username,
-          role: decodedAdmin.role
+          email: decodedAdmin.email,
+          role: decodedAdmin.role,
         };
       }
     } catch (err) {
@@ -86,9 +88,11 @@ exports.adminProtect = (req, res, next) => {
     }
 
     req.admin = {
-      id: decoded.id,
+      id: decoded.id || decoded._id,
+      _id: decoded._id || decoded.id,
       username: decoded.username,
-      role: decoded.role
+      email: decoded.email,
+      role: decoded.role,
     };
     next();
   } catch (err) {

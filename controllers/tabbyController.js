@@ -1209,9 +1209,8 @@ const syncTabbyOrders = async (req = {}, res = null) => {
         ]
       };
     } else {
-      // Otherwise, sync all pending orders from the last 7 days
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      query.createdAt = { $gte: sevenDaysAgo };
+      // Sync all pending Tabby orders
+      query.paymentStatus = "pending";
     }
 
     const pendingOrders = await Order.find(query);
@@ -1234,7 +1233,14 @@ const syncTabbyOrders = async (req = {}, res = null) => {
       const sessionId = order.tabbySessionId;
 
       if (!sessionId) {
-        console.warn(`⚠️ Order ${order.orderId} has no Tabby Session ID. Skipping.`);
+        // If order has no session ID and is older than 2 hours, mark failed
+        const orderAgeMs = Date.now() - new Date(order.createdAt).getTime();
+        if (orderAgeMs > 2 * 60 * 60 * 1000) {
+          await Order.findByIdAndUpdate(order._id, {
+            $set: { paymentStatus: "failed", orderStatus: "Cancelled" }
+          });
+          results.updated++;
+        }
         continue;
       }
 
@@ -1252,7 +1258,7 @@ const syncTabbyOrders = async (req = {}, res = null) => {
               tabbyData = chkRes.data?.payment || chkRes.data;
               if (chkRes.data?.payment?.id) paymentId = chkRes.data.payment.id;
             } catch (cErr) {
-              console.warn(`Checkout fallback error: ${cErr.message}`);
+              // 404 on both payments and checkout means session expired without payment
             }
           }
         }
@@ -1261,7 +1267,7 @@ const syncTabbyOrders = async (req = {}, res = null) => {
           const tabbyStatus = (tabbyData.status || "").toLowerCase();
 
           if (["closed", "captured", "authorized"].includes(tabbyStatus)) {
-            console.log(`✅ Order ${order.orderId} found as ${tabbyStatus} in Tabby. Syncing to PAID...`);
+            console.log(`✅ Order ${order.orderId || order._id} found as ${tabbyStatus} in Tabby. Syncing to PAID...`);
             
             let captureId = null;
             if (tabbyStatus === "authorized" && paymentId) {
@@ -1314,10 +1320,20 @@ const syncTabbyOrders = async (req = {}, res = null) => {
                results.updated++;
              }
           }
+        } else {
+          // If no Tabby data (404) and the order was created more than 2 hours ago, it's expired/abandoned
+          const orderAgeMs = Date.now() - new Date(order.createdAt).getTime();
+          if (orderAgeMs > 2 * 60 * 60 * 1000 || orderId) {
+            console.log(`⏱️ Tabby session ${sessionId} expired / not found. Marking order ${order.orderId || order._id} Cancelled.`);
+            await Order.findByIdAndUpdate(order._id, {
+              $set: { paymentStatus: "failed", orderStatus: "Cancelled" }
+            });
+            results.updated++;
+          }
         }
       } catch (err) {
         results.failed++;
-        results.errors.push({ orderId: order.orderId, error: err.message });
+        results.errors.push({ orderId: order.orderId || order._id, error: err.message });
       }
     }
 

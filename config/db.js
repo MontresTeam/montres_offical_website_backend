@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { seedAdmins } = require("../utils/seedAdmin");
 
 const connectDB = async function (retries = 5, delay = 3000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -11,6 +12,12 @@ const connectDB = async function (retries = 5, delay = 3000) {
         retryWrites: true,
       });
       console.log("DB connected successfully");
+
+      // Auto-seed built-in admin accounts and categories on startup
+      seedAdmins().catch((err) => {
+        console.warn("⚠️ Background admin auto-seed warning:", err.message);
+      });
+
       return;
     } catch (error) {
       console.error(`Attempt ${attempt} of ${retries} - Error initially connecting to DB:`, error.message || error);

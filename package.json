@@ -2,7 +2,8 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "seed:faq": "node scripts/seedFaq.js"
+    "seed:faq": "node scripts/seedFaq.js",
+    "seed:admin": "node scripts/seedAdmin.js"
   },
   "dependencies": {
     "aws-sdk": "^2.1693.0",

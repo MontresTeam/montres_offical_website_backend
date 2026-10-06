@@ -7,25 +7,18 @@ const {
   DeleteSeoPages,
   getSeoById
 } = require('../controllers/seoPage.controller');
+const { adminProtect } = require('../middlewares/authMiddleware');
 
 const router = express.Router();
 
-router.post('/Add', createSEOAllpage);
-
-// Get all
+// Public routes
 router.get("/Allpages", getAllSeoPages);
 router.get("/by-slug", getSeoBySlug);
-
-
-// ✅ GET by id
 router.get('/:id', getSeoById);
 
-
-
-// Update by id
-router.put("/:id", EditSeoPages);
-
-// Delete by id
-router.delete("/:id", DeleteSeoPages);
+// Admin-protected mutation routes (full access for admin & content_manager)
+router.post('/Add', adminProtect, createSEOAllpage);
+router.put("/:id", adminProtect, EditSeoPages);
+router.delete("/:id", adminProtect, DeleteSeoPages);
 
 module.exports = router;

@@ -180,11 +180,16 @@ const io = new Server(server, {
 app.set('socketio', io);
 socketHandler(io);
 
-// ✅ Periodic Tabby Auto-Reconciliation (Runs every 10 mins to catch any dropped webhooks)
+// ✅ Periodic Payment Auto-Reconciliation (Runs every 10 mins to catch any dropped webhooks)
 const { syncTabbyOrders } = require('./controllers/tabbyController');
+const { syncStripeOrders } = require('./controllers/orderController');
+
 setInterval(() => {
   syncTabbyOrders().catch((err) => {
     console.error("⚠️ Background Tabby Sync Warning:", err.message);
+  });
+  syncStripeOrders().catch((err) => {
+    console.error("⚠️ Background Stripe Sync Warning:", err.message);
   });
 }, 10 * 60 * 1000);
 
