@@ -15,10 +15,12 @@ const formatPhone = (p, country = "AE") => {
     const c = (country || "AE").toUpperCase();
 
     if (c === "AE") {
+        if (cleaned.startsWith("97105")) return "+971" + cleaned.substring(4);
         if (cleaned.startsWith("971")) return "+" + cleaned;
         if (cleaned.startsWith("05")) return "+971" + cleaned.substring(1);
         if (cleaned.length === 9 && cleaned.startsWith("5")) return "+971" + cleaned;
     } else if (c === "SA") {
+        if (cleaned.startsWith("96605")) return "+966" + cleaned.substring(4);
         if (cleaned.startsWith("966")) return "+" + cleaned;
         if (cleaned.startsWith("05")) return "+966" + cleaned.substring(1);
         if (cleaned.length === 9 && cleaned.startsWith("5")) return "+966" + cleaned;
@@ -433,23 +435,27 @@ const captureTamaraPayment = async (tamaraOrderId, totalAmount, currency = "AED"
 const authoriseTamaraOrder = async (tamaraOrderId) => {
     try {
         console.log(`📡 Authorising Tamara Order: ${tamaraOrderId}`);
-        const response = await axios.post(`${process.env.TAMARA_API_BASE}/payments/authorise`, {
-            order_id: tamaraOrderId
-        }, {
+        const response = await axios.post(`${process.env.TAMARA_API_BASE}/orders/${tamaraOrderId}/authorise`, {}, {
             headers: {
                 Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
                 "Content-Type": "application/json",
             },
         });
 
-        if (response.data.status === "authorised" || response.data.status === "fully_authorised") {
+        const status = (response.data?.status || "").toLowerCase();
+        if (["authorised", "authorized", "fully_authorised", "fully_captured"].includes(status) || response.data?.order_id) {
             console.log(`✅ Tamara Authorisation Success for ${tamaraOrderId}`);
             return true;
         }
-        console.warn(`⚠️ Tamara Authorisation status: ${response.data.status}`);
+        console.warn(`⚠️ Tamara Authorisation status: ${response.data?.status}`);
         return false;
     } catch (err) {
-        console.error("❌ Tamara Authorisation Error:", err.response?.data || err.message);
+        const errorData = err.response?.data;
+        if (errorData?.errors?.some(e => e.error_code === "transition_not_allowed" || e.error_code === "order_already_authorised")) {
+            console.warn(`⚠️ Tamara Authorisation: Already in target state for ${tamaraOrderId}`);
+            return true;
+        }
+        console.error("❌ Tamara Authorisation Error:", errorData || err.message);
         return false;
     }
 };
@@ -473,8 +479,47 @@ const getTamaraOrderStatus = async (tamaraOrderId) => {
 };
 
 // ==================================================
-// HANDLE TAMARA WEBHOOK
+// GET TAMARA PAYMENT TYPES & ELIGIBILITY (PUBLIC API)
 // ==================================================
+const getTamaraPaymentTypes = async (req, res) => {
+    try {
+        const rawCountry = req.query.country || req.body?.country || "AE";
+        const country = normalizeCountryCode(rawCountry);
+        const currency = (req.query.currency || req.body?.currency || (country === "SA" ? "SAR" : "AED")).toUpperCase();
+        const orderValue = Number(req.query.orderValue || req.query.order_value || req.body?.orderValue || req.body?.order_value || 500);
+        const rawPhone = req.query.phone || req.body?.phone || (country === "SA" ? "+966500000001" : "+971500000001");
+        const phone = formatPhone(rawPhone, country) || rawPhone;
+
+        const response = await axios.get(`${process.env.TAMARA_API_BASE}/checkout/payment-types`, {
+            headers: {
+                Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
+                "Content-Type": "application/json",
+            },
+            params: {
+                country,
+                currency,
+                order_value: orderValue,
+                phone,
+            },
+        });
+
+        return res.status(200).json({
+            success: true,
+            country,
+            currency,
+            orderValue,
+            paymentTypes: response.data || [],
+        });
+    } catch (error) {
+        console.error("❌ Tamara Payment Types Error:", error.response?.data || error.message);
+        return res.status(error.response?.status || 500).json({
+            success: false,
+            message: "Failed to fetch Tamara payment types",
+            error: error.response?.data || error.message,
+        });
+    }
+};
+
 // ==================================================
 // HANDLE TAMARA WEBHOOK
 // ==================================================
@@ -523,16 +568,13 @@ const handleTamaraWebhook = async (req, res) => {
             
             const authorised = await authoriseTamaraOrder(tamaraOrderId);
             if (!authorised) {
-                // If authorisation fails, we return 500 to let Tamara retry the webhook
+                // If authorisation fails, return 500 to let Tamara retry the webhook
                 return res.status(500).send("Authorisation failed, retrying...");
             }
-            
-            // If authorised, we proceed to update order status (Logic continues in success events block)
         }
 
-        // 5. Handle Success Events (Authorised)
-        const isSuccessEvent = ["order_authorized", "order_authorised", "authorised"].includes(eventType) || 
-                             (["approved", "order_approved"].includes(eventType)); // Include approved because we just authorised it above
+        // 5. Handle Success Events (Authorised / Captured)
+        const isSuccessEvent = ["order_authorized", "order_authorised", "authorised", "order_approved", "approved"].includes(eventType);
 
         if (isSuccessEvent) {
             // Idempotent update to PAID
@@ -568,15 +610,12 @@ const handleTamaraWebhook = async (req, res) => {
             }
 
             // AUTO-CAPTURE
-            const isAuthorised = ["order_authorized", "order_authorised", "authorised"].includes(eventType) || ["approved", "order_approved"].includes(eventType);
-            if (isAuthorised) {
-                console.log(`📡 Status is ${eventType}. Triggering Capture for ${tamaraOrderId}...`);
-                captureTamaraPayment(
-                    tamaraOrderId,
-                    activeOrder.total,
-                    activeOrder.currency || "AED"
-                );
-            }
+            console.log(`📡 Status is ${eventType}. Triggering Capture for ${tamaraOrderId}...`);
+            captureTamaraPayment(
+                tamaraOrderId,
+                activeOrder.total,
+                activeOrder.currency || (activeOrder.shippingAddress?.country === "SA" ? "SAR" : "AED")
+            );
         }
 
         // 6. Handle Captured Events
@@ -587,6 +626,7 @@ const handleTamaraWebhook = async (req, res) => {
                     $set: {
                         paymentStatus: "paid",
                         orderStatus: "Paid / Awaiting Shipment",
+                        tamaraOrderId: tamaraOrderId,
                         paidAt: new Date()
                     }
                 }
@@ -608,7 +648,7 @@ const handleTamaraWebhook = async (req, res) => {
             console.log(`❌ Order ${order._id} marked FAILED via Tamara (${eventType})`);
         }
 
-        // 7. Handle Refund Events
+        // 8. Handle Refund Events
         else if (["order_refunded", "refunded"].includes(eventType)) {
             await Order.findOneAndUpdate(
                 { _id: order._id },
@@ -631,12 +671,11 @@ const cancelTamaraOrder = async (tamaraOrderId, amount, currency = "AED") => {
     try {
         console.log(`🚀 Cancelling Tamara Order: ${tamaraOrderId} (${amount} ${currency})`);
         const cancelPayload = {
-            order_id: tamaraOrderId,
-            cancel_amount: { amount: Number(amount.toFixed(2)), currency: currency },
+            total_amount: { amount: Number(amount.toFixed(2)), currency: currency },
             comment: "Admin initiated cancellation"
         };
 
-        const response = await axios.post(`${process.env.TAMARA_API_BASE}/payments/cancel`, cancelPayload, {
+        const response = await axios.post(`${process.env.TAMARA_API_BASE}/orders/${tamaraOrderId}/cancel`, cancelPayload, {
             headers: {
                 Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
                 "Content-Type": "application/json",
@@ -654,13 +693,20 @@ const cancelTamaraOrder = async (tamaraOrderId, amount, currency = "AED") => {
 // ==================================================
 // REFUND TAMARA PAYMENT
 // ==================================================
-const refundTamaraPayment = async (tamaraOrderId, amount, currency = "AED") => {
+const refundTamaraPayment = async (tamaraOrderId, amount, currency = "AED", comment = "Admin initiated refund") => {
     try {
         console.log(`🚀 Refunding Tamara Order: ${tamaraOrderId} (${amount} ${currency})`);
+        const formattedAmount = Number(amount.toFixed(2));
         const refundPayload = {
             order_id: tamaraOrderId,
-            refund_amount: { amount: Number(amount.toFixed(2)), currency: currency },
-            comment: "Admin initiated refund"
+            total_amount: { amount: formattedAmount, currency: currency },
+            comment: comment,
+            refunds: [
+                {
+                    total_amount: { amount: formattedAmount, currency: currency },
+                    comment: comment
+                }
+            ]
         };
 
         const response = await axios.post(`${process.env.TAMARA_API_BASE}/payments/refund`, refundPayload, {
@@ -678,13 +724,64 @@ const refundTamaraPayment = async (tamaraOrderId, amount, currency = "AED") => {
     }
 };
 
+// ==================================================
+// SYNC TAMARA ORDERS (BACKGROUND RECONCILIATION)
+// ==================================================
+const syncTamaraOrders = async () => {
+    try {
+        const pendingTamaraOrders = await Order.find({
+            paymentMethod: "tamara",
+            paymentStatus: "pending",
+            tamaraOrderId: { $exists: true, $ne: null },
+            createdAt: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) }
+        });
+
+        console.log(`🔄 Found ${pendingTamaraOrders.length} pending Tamara orders for reconciliation`);
+        let updatedCount = 0;
+
+        for (const order of pendingTamaraOrders) {
+            const tamaraData = await getTamaraOrderStatus(order.tamaraOrderId);
+            if (!tamaraData) continue;
+
+            const status = (tamaraData.status || "").toLowerCase();
+            console.log(`Order ${order._id} (Tamara ID: ${order.tamaraOrderId}) Status on Tamara: ${status}`);
+
+            if (["authorised", "authorized", "fully_captured", "captured", "paid"].includes(status)) {
+                await Order.findByIdAndUpdate(order._id, {
+                    $set: {
+                        paymentStatus: "paid",
+                        orderStatus: "Paid / Awaiting Shipment",
+                        paidAt: new Date()
+                    }
+                });
+                updatedCount++;
+            } else if (["canceled", "cancelled", "declined", "expired", "failed"].includes(status)) {
+                await Order.findByIdAndUpdate(order._id, {
+                    $set: {
+                        paymentStatus: "failed",
+                        orderStatus: "Cancelled"
+                    }
+                });
+                updatedCount++;
+            }
+        }
+
+        return { success: true, processed: pendingTamaraOrders.length, updated: updatedCount };
+    } catch (error) {
+        console.error("❌ Tamara sync error:", error.message);
+        return { success: false, error: error.message };
+    }
+};
+
 module.exports = {
     createTamaraOrder,
     normalizeCountryCode,
     handleTamaraWebhook,
     getTamaraOrderStatus,
+    getTamaraPaymentTypes,
     authoriseTamaraOrder,
     captureTamaraPayment,
     cancelTamaraOrder,
-    refundTamaraPayment
+    refundTamaraPayment,
+    syncTamaraOrders
 };
