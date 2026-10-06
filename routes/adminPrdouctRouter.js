@@ -9,8 +9,8 @@ const router = express.Router();
 // Apply adminProtect to all routes in this router
 router.use(adminProtect);
 
-// Only CEO and Developer can delete products
-router.delete("/:id", restrictTo("ceo", "developer"), deleteProduct);
+// CEO, Developer, and Content Manager can delete products
+router.delete("/:id", restrictTo("ceo", "developer", "content_manager"), deleteProduct);
 
 router.post("/add", addProductImageUpload, addProduct);
 router.put("/:id", updateProductImageUpload, updateProduct); // other routes can use generic upload

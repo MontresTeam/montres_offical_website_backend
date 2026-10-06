@@ -165,6 +165,33 @@ const addProduct = async (req, res) => {
       functions: parseJSON(productData.functions),
       replacementParts: parseJSON(productData.replacementParts),
 
+      // Leather Goods Fields
+      leatherMainCategory: productData.leatherMainCategory || "",
+      leatherSubCategory: productData.leatherSubCategory || "",
+      modelCode: productData.modelCode || "",
+      leatherMaterial: productData.leatherMaterial || "",
+      interiorMaterial: productData.interiorMaterial || "",
+      hardwareColor: productData.hardwareColor || "",
+      leatherSize: productData.leatherSize || undefined,
+      strapLength: parseNumber(productData.strapLength) || undefined,
+      leatherAccessories: parseJSON(productData.leatherAccessories),
+      scopeOfDelivery: parseJSON(productData.scopeOfDelivery),
+
+      // Accessory Fields
+      accessoryCategory: productData.accessoryCategory || "",
+      accessorySubCategory: productData.accessorySubCategory || "",
+      accessoryName: productData.accessoryName || "",
+      accessoryMaterial: parseJSON(productData.accessoryMaterial),
+      accessoryColor: parseJSON(productData.accessoryColor),
+      accessoryDelivery: parseJSON(productData.accessoryDelivery),
+      accessoryScopeOfDelivery: parseJSON(productData.accessoryScopeOfDelivery),
+
+      // Legacy / helper category fields
+      categorisOne: productData.categorisOne || "",
+      subcategory: parseJSON(productData.subcategory),
+      conditionNotes: productData.conditionNotes || "",
+      color: productData.color || "",
+
       regularPrice: parseNumber(productData.regularPrice),
       salePrice: parseNumber(productData.salePrice),
       taxStatus: productData.taxStatus || "taxable",
@@ -334,6 +361,34 @@ const updateProduct = async (req, res) => {
       ...(req.body.jewels !== undefined && { jewels: parseIntNum(req.body.jewels) }),
       ...(req.body.functions && { functions: parseJSON(req.body.functions) }),
       ...(req.body.replacementParts && { replacementParts: parseJSON(req.body.replacementParts) }),
+
+      // Leather Goods Fields
+      ...(req.body.leatherMainCategory !== undefined && { leatherMainCategory: req.body.leatherMainCategory }),
+      ...(req.body.leatherSubCategory !== undefined && { leatherSubCategory: req.body.leatherSubCategory }),
+      ...(req.body.modelCode !== undefined && { modelCode: req.body.modelCode }),
+      ...(req.body.leatherMaterial !== undefined && { leatherMaterial: req.body.leatherMaterial }),
+      ...(req.body.interiorMaterial !== undefined && { interiorMaterial: req.body.interiorMaterial }),
+      ...(req.body.hardwareColor !== undefined && { hardwareColor: req.body.hardwareColor }),
+      ...(req.body.leatherSize !== undefined && { leatherSize: req.body.leatherSize }),
+      ...(req.body.strapLength !== undefined && { strapLength: parseNumber(req.body.strapLength) }),
+      ...(req.body.leatherAccessories && { leatherAccessories: parseJSON(req.body.leatherAccessories) }),
+      ...(req.body.scopeOfDelivery && { scopeOfDelivery: parseJSON(req.body.scopeOfDelivery) }),
+
+      // Accessory Fields
+      ...(req.body.accessoryCategory !== undefined && { accessoryCategory: req.body.accessoryCategory }),
+      ...(req.body.accessorySubCategory !== undefined && { accessorySubCategory: req.body.accessorySubCategory }),
+      ...(req.body.accessoryName !== undefined && { accessoryName: req.body.accessoryName }),
+      ...(req.body.accessoryMaterial && { accessoryMaterial: parseJSON(req.body.accessoryMaterial) }),
+      ...(req.body.accessoryColor && { accessoryColor: parseJSON(req.body.accessoryColor) }),
+      ...(req.body.accessoryDelivery && { accessoryDelivery: parseJSON(req.body.accessoryDelivery) }),
+      ...(req.body.accessoryScopeOfDelivery && { accessoryScopeOfDelivery: parseJSON(req.body.accessoryScopeOfDelivery) }),
+
+      // Legacy / helper category fields
+      ...(req.body.categorisOne !== undefined && { categorisOne: req.body.categorisOne }),
+      ...(req.body.subcategory && { subcategory: parseJSON(req.body.subcategory) }),
+      ...(req.body.conditionNotes !== undefined && { conditionNotes: req.body.conditionNotes }),
+      ...(req.body.color !== undefined && { color: req.body.color }),
+
       ...(req.body.regularPrice !== undefined && { regularPrice: parseNumber(req.body.regularPrice) }),
       ...(req.body.salePrice !== undefined && { salePrice: parseNumber(req.body.salePrice) }),
       ...(req.body.taxStatus && { taxStatus: req.body.taxStatus }),

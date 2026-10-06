@@ -129,6 +129,40 @@ const handleStripeWebhook = async (req, res) => {
             }
         }
 
+        else if (event.type === "checkout.session.expired") {
+            const session = event.data.object;
+            const orderId = session.metadata?.orderId;
+            console.log(`⏱️ Stripe Checkout Session EXPIRED for Order: ${orderId}`);
+            if (orderId) {
+                await Order.findOneAndUpdate(
+                    { _id: orderId, paymentStatus: { $ne: "paid" } },
+                    {
+                        $set: {
+                            paymentStatus: "failed",
+                            orderStatus: "Cancelled"
+                        }
+                    }
+                );
+            }
+        }
+
+        else if (event.type === "payment_intent.canceled") {
+            const paymentIntent = event.data.object;
+            const orderId = paymentIntent.metadata?.orderId;
+            console.log(`❌ Payment Intent CANCELED for Order: ${orderId}`);
+            if (orderId) {
+                await Order.findOneAndUpdate(
+                    { _id: orderId, paymentStatus: { $ne: "paid" } },
+                    {
+                        $set: {
+                            paymentStatus: "failed",
+                            orderStatus: "Cancelled"
+                        }
+                    }
+                );
+            }
+        }
+
         else if (event.type === "charge.refunded") {
             const charge = event.data.object;
             const orderId = charge.metadata?.orderId;

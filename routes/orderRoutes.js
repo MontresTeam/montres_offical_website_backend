@@ -20,6 +20,7 @@ const {
   refundOrder,
   updateOrderLogistics,
   sendOrderTrackingEmail,
+  sendPaymentRecoveryEmailController,
 } = require("../controllers/orderController");
 
 // ✅ Place this route BEFORE /:id
@@ -30,6 +31,8 @@ router.post("/stripe/create-checkout", optionalProtect, createStripeOrder);
 router.post("/calculate-shipping", optionalProtect, calculateShipping);
 router.post("/:id/refund", adminProtect, refundOrder);
 router.post("/:id/send-tracking-email", adminProtect, sendOrderTrackingEmail);
+router.post("/:id/send-recovery-email", adminProtect, sendPaymentRecoveryEmailController);
+router.post("/send-recovery-email/:id", adminProtect, sendPaymentRecoveryEmailController);
 
 // Shipping
 router.get("/shipping", protect, getShippingAddresses);

@@ -249,8 +249,12 @@ const productSchema = new mongoose.Schema(
       type: String,
       enum: [
         "Watch",
+        "Watches",
         "Jewellery",
+        "Jewelry",
         "Gold",
+        "Gold Bullion/Coins",
+        "Gold Bullion & Coins",
         "Accessories",
         "Leather Goods",
         "Leather Bags",
@@ -689,7 +693,7 @@ productSchema.methods._cleanResponseByCategory = function (ret) {
   }
 
   // For Watches
-  if (category === "Watch") {
+  if (category === "Watch" || category === "Watches") {
     this._removeLeatherGoodsFields(ret);
     this._removeAccessoryFields(ret);
     return;
@@ -702,7 +706,7 @@ productSchema.methods._cleanResponseByCategory = function (ret) {
     return;
   }
 
-  // For Jewellery and Gold (remove all other category fields)
+  // For Jewellery, Jewelry, Gold, Gold Bullion/Coins (remove all other category fields)
   this._removeWatchFields(ret);
   this._removeLeatherGoodsFields(ret);
   this._removeAccessoryFields(ret);

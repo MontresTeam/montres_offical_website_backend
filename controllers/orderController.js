@@ -6,6 +6,7 @@ const { calculateShippingFee } = require("../utils/shippingCalculator");
 const { getTamaraOrderStatus, captureTamaraPayment, refundTamaraPayment } = require("./tamaraController");
 const { refundTabbyPayment } = require("./tabbyController");
 const sendOrderConfirmation = require("../utils/sendOrderConfirmation");
+const sendPaymentRecoveryEmail = require("../utils/sendPaymentRecoveryEmail");
 const { sendShipmentTrackingEmail } = require("../services/emailService");
 const User = require("../models/UserModel");
 const stripePkg = require("stripe");
@@ -370,7 +371,7 @@ const getOrderById = async (req, res) => {
             if (freshOrder) order = freshOrder;
           }
 
-        } else if (session?.status === "expired" || stripePaymentStatus === "unpaid") {
+        } else if (session?.status === "expired" || session?.status === "canceled") {
           console.log(`❌ Stripe session ${order.stripeSessionId} is ${session.status}. Marking FAILED.`);
           await Order.findByIdAndUpdate(order._id, { $set: { paymentStatus: "failed", orderStatus: "Cancelled" } });
           order.paymentStatus = "failed";
@@ -497,6 +498,15 @@ const getOrderById = async (req, res) => {
               order.orderStatus = "Cancelled";
             }
           }
+        } else {
+          // If no Tabby data (404) and the order was created more than 2 hours ago, it's expired/abandoned
+          const orderAgeMs = Date.now() - new Date(order.createdAt).getTime();
+          if (orderAgeMs > 2 * 60 * 60 * 1000) {
+            console.log(`❌ Tabby session ${order.tabbySessionId} expired / not found after 2 hours. Marking FAILED.`);
+            await Order.findByIdAndUpdate(order._id, { $set: { paymentStatus: "failed", orderStatus: "Cancelled" } });
+            order.paymentStatus = "failed";
+            order.orderStatus = "Cancelled";
+          }
         }
       } catch (tabbyErr) {
         // Never crash the order lookup if Tabby API is temporarily unavailable
@@ -513,7 +523,38 @@ const getOrderById = async (req, res) => {
 
 const getAllOrders = async (req, res) => {
   try {
-    const orders = await Order.find().sort({ createdAt: -1 });
+    const rawOrders = await Order.find().sort({ createdAt: -1 }).lean();
+
+    const orders = rawOrders.map((order) => {
+      let failureReason = order.failureReason || "";
+      let paymentFailureType = order.paymentFailureType || "none";
+      const isUnsuccessful =
+        ["pending", "failed", "cancelled", "Cancelled"].includes(order.paymentStatus) ||
+        ["Cancelled", "Pending", "failed"].includes(order.orderStatus);
+
+      if (!failureReason && isUnsuccessful && order.paymentStatus !== "paid") {
+        if (order.paymentMethod === "tamara") {
+          failureReason = "Customer abandoned Tamara checkout (Session Expired / OTP not entered)";
+          paymentFailureType = "customer_abandoned";
+        } else if (order.paymentMethod === "tabby") {
+          failureReason = "Customer abandoned Tabby checkout (Session Expired / Window Closed)";
+          paymentFailureType = "customer_abandoned";
+        } else if (order.paymentMethod === "stripe") {
+          failureReason = "Customer abandoned Stripe Checkout (Session Expired without entering card)";
+          paymentFailureType = "customer_abandoned";
+        }
+      }
+
+      const customerEmail = order.shippingAddress?.email || order.billingAddress?.email || "";
+
+      return {
+        ...order,
+        failureReason,
+        paymentFailureType,
+        canSendRecoveryEmail: isUnsuccessful && !!customerEmail && order.paymentStatus !== "paid",
+      };
+    });
+
     return res.json({ orders });
   } catch (error) {
     return res.status(500).json({ message: "Server error" });
@@ -781,6 +822,99 @@ const sendOrderTrackingEmail = async (req, res) => {
   }
 };
 
+/**
+ * 🔄 Periodic Stripe Auto-Reconciliation
+ */
+const syncStripeOrders = async () => {
+  if (!stripe) return { processed: 0, updated: 0 };
+  try {
+    const pendingOrders = await Order.find({ paymentMethod: "stripe", paymentStatus: "pending" });
+    let updated = 0;
+
+    for (const order of pendingOrders) {
+      if (!order.stripeSessionId) continue;
+      try {
+        const session = await stripe.checkout.sessions.retrieve(order.stripeSessionId);
+        if (session.payment_status === "paid") {
+          const updatedOrder = await Order.findOneAndUpdate(
+            { _id: order._id, paymentStatus: "pending" },
+            {
+              $set: {
+                paymentStatus: "paid",
+                orderStatus: "Paid / Awaiting Shipment",
+                stripePaymentIntentId: session.payment_intent,
+                paidAt: new Date()
+              }
+            },
+            { new: true }
+          );
+
+          if (updatedOrder) {
+            updated++;
+            if (updatedOrder.userId) {
+              User.findByIdAndUpdate(updatedOrder.userId, {
+                $set: { cart: [] },
+                $addToSet: { orders: updatedOrder._id }
+              }).catch(e => console.error("User sync error:", e.message));
+            }
+            sendOrderConfirmation(updatedOrder._id)
+              .catch(e => console.error("Email error:", e.message));
+          }
+        } else if (session.status === "expired" || session.status === "canceled") {
+          await Order.findByIdAndUpdate(order._id, {
+            $set: { paymentStatus: "failed", orderStatus: "Cancelled" }
+          });
+          updated++;
+        }
+      } catch (err) {
+        console.error(`Stripe sync error for order ${order._id}:`, err.message);
+      }
+    }
+
+    return { processed: pendingOrders.length, updated };
+  } catch (err) {
+    console.error("Stripe sync failed:", err.message);
+    return { error: err.message };
+  }
+};
+
+/**
+ * 📧 Super Admin: Send Payment Recovery / Retry Email
+ */
+const sendPaymentRecoveryEmailController = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { customMessage, retryUrl } = req.body || {};
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    const email = order.shippingAddress?.email || order.billingAddress?.email;
+    if (!email) {
+      return res.status(400).json({ success: false, message: "No customer email address on this order" });
+    }
+
+    const result = await sendPaymentRecoveryEmail(id, { customMessage, retryUrl });
+
+    return res.status(200).json({
+      success: true,
+      message: `Payment recovery email sent successfully to ${email}`,
+      order: result.order,
+      recoveryEmailCount: result.order.recoveryEmailCount,
+      lastRecoveryEmailSentAt: result.order.lastRecoveryEmailSentAt
+    });
+  } catch (error) {
+    console.error("Send Payment Recovery Email Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send payment recovery email",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createStripeOrder,
   getOrderById,
@@ -799,4 +933,8 @@ module.exports = {
   refundOrder,
   updateOrderLogistics,
   sendOrderTrackingEmail,
+  sendPaymentRecoveryEmailController,
+  syncStripeOrders,
 };
+
+
