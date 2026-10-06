@@ -147,7 +147,7 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-orderSchema.pre("save", async function (next) {
+orderSchema.pre("save", async function () {
   if (!this.orderNumber) {
     try {
       const prefix = "DM";
@@ -180,7 +180,6 @@ orderSchema.pre("save", async function (next) {
       console.error("Error generating sequential orderNumber in Montres pre-save:", err);
     }
   }
-  next();
 });
 
 module.exports = mongoose.model("Order", orderSchema);

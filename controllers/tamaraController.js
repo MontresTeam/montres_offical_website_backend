@@ -51,7 +51,7 @@ const normalizeCountryCode = (value) => {
 };
 
 // ==================================================
-// CREATE TAMARA ORDER (FIXED - AED DIRECT)
+// CREATE TAMARA ORDER (SUPPORT SAUDI ARABIA & UAE)
 // ==================================================
 const createTamaraOrder = async (req, res) => {
     try {
@@ -63,28 +63,53 @@ const createTamaraOrder = async (req, res) => {
             shippingAddress,
             billingAddress,
             instalments = 4,
+            currency: requestedCurrency,
         } = req.body || {};
 
         // ===============================
-        // VALIDATION
+        // COUNTRY & CURRENCY RESOLUTION
         // ===============================
+        const rawCountry = shippingAddress?.country || billingAddress?.country || "AE";
+        const countryCode = normalizeCountryCode(rawCountry);
 
-        const buyerPhone = formatPhone(shippingAddress?.phone, "AE");
+        // Currency: default to SAR for Saudi Arabia, AED for UAE, or requestedCurrency
+        const orderCurrency = requestedCurrency 
+            ? requestedCurrency.toUpperCase()
+            : (countryCode === "SA" ? "SAR" : "AED");
 
-        if (!buyerPhone || !buyerPhone.startsWith("+971")) {
+        // ===============================
+        // PHONE VALIDATION
+        // ===============================
+        const rawPhone = shippingAddress?.phone || billingAddress?.phone;
+        const buyerPhone = formatPhone(rawPhone, countryCode);
+
+        if (!buyerPhone) {
             return res.status(400).json({
                 success: false,
-                message: "A valid UAE phone number is required for Tamara.",
+                message: `A valid mobile phone number is required for Tamara (${countryCode === "SA" ? "Saudi Arabia +966" : "UAE +971"}).`,
             });
         }
 
-        const countryCode = "AE";
+        if (countryCode === "SA" && !buyerPhone.startsWith("+966")) {
+            return res.status(400).json({
+                success: false,
+                message: "A valid Saudi phone number starting with +966 is required for Tamara in Saudi Arabia.",
+            });
+        }
+
+        if (countryCode === "AE" && !buyerPhone.startsWith("+971")) {
+            return res.status(400).json({
+                success: false,
+                message: "A valid UAE phone number starting with +971 is required for Tamara in the UAE.",
+            });
+        }
+
         const ALLOWED_INSTALLMENTS = [2, 3, 4, 6, 12];
 
         if (!ALLOWED_INSTALLMENTS.includes(Number(instalments))) {
             return res.status(400).json({
                 success: false,
-                message: "Allowed instalments: 3, 4, 6",
+                message: "Allowed instalments: 2, 3, 4, 6",
             });
         }
 
@@ -108,7 +133,7 @@ const createTamaraOrder = async (req, res) => {
             subtotal = order.subtotal;
 
             const calc = calculateShippingFee({
-                country: shippingAddress?.country || order.shippingAddress?.country || "AE",
+                country: countryCode,
                 subtotal
             });
             shippingFee = calc.shippingFee;
@@ -118,6 +143,8 @@ const createTamaraOrder = async (req, res) => {
             order.billingAddress = finalBillingAddress;
             order.shippingFee = shippingFee;
             order.total = total;
+            order.currency = orderCurrency;
+            order.settlementCurrency = orderCurrency;
             order.paymentMethod = "tamara";
             await order.save();
         } else {
@@ -140,7 +167,7 @@ const createTamaraOrder = async (req, res) => {
                         name: product.name,
                         image: product.images?.[0]?.url || "",
                         price: Number(price),
-                        regularPrice: product.regularPrice, // Capture regular price for originalPrice calculation
+                        regularPrice: product.regularPrice,
                         quantity: Number(it.quantity) || 1,
                         sku: product.sku || product._id.toString(),
                     };
@@ -153,13 +180,12 @@ const createTamaraOrder = async (req, res) => {
             );
 
             const calc = calculateShippingFee({
-                country: shippingAddress?.country || "AE",
+                country: countryCode,
                 subtotal
             });
             shippingFee = calc.shippingFee;
             total = subtotal + shippingFee;
 
-            // Calculate originalPrice for new regular order
             const originalPriceTotal = populatedItems.reduce((acc, item) => acc + (item.regularPrice || item.price) * item.quantity, 0);
 
             order = await Order.create({
@@ -170,8 +196,8 @@ const createTamaraOrder = async (req, res) => {
                 shippingFee,
                 total,
                 vat: 0,
-                currency: "AED",
-                settlementCurrency: "AED",
+                currency: orderCurrency,
+                settlementCurrency: orderCurrency,
                 fxRate: 1,
                 shippingAddress,
                 billingAddress: finalBillingAddress,
@@ -193,11 +219,11 @@ const createTamaraOrder = async (req, res) => {
             quantity: item.quantity,
             unit_price: {
                 amount: Number(item.price.toFixed(2)),
-                currency: "AED",
+                currency: orderCurrency,
             },
             total_amount: {
                 amount: Number((item.price * item.quantity).toFixed(2)),
-                currency: "AED",
+                currency: orderCurrency,
             },
         }));
 
@@ -205,7 +231,7 @@ const createTamaraOrder = async (req, res) => {
 
         const baseUrl =
             process.env.CLIENT_URL ||
-            "http://localhost:3000";
+            "https://www.montres.ae";
 
         const backendUrl =
             process.env.BACKEND_URL ||
@@ -213,52 +239,49 @@ const createTamaraOrder = async (req, res) => {
 
         const tamaraPayload = {
             order_reference_id: orderId,
-            order_number: orderId,
-            description: `Order ${orderId} - Montres`,
+            order_number: order.orderNumber || orderId,
+            description: `Order ${order.orderNumber || orderId} - Montres`,
             total_amount: {
                 amount: tamaraTotal,
-                currency: "AED",
+                currency: orderCurrency,
             },
             shipping_amount: {
                 amount: Number(shippingFee.toFixed(2)),
-                currency: "AED",
+                currency: orderCurrency,
             },
             tax_amount: {
                 amount: 0,
-                currency: "AED",
+                currency: orderCurrency,
             },
             items: tamaraItems,
             consumer: {
-                first_name: shippingAddress.firstName,
-                last_name: shippingAddress.lastName,
+                first_name: shippingAddress.firstName || "Customer",
+                last_name: shippingAddress.lastName || "",
                 email: shippingAddress.email || req.user?.email || "customer@montres.ae",
                 phone_number: buyerPhone,
             },
             billing_address: {
-                first_name: finalBillingAddress.firstName,
-                last_name: finalBillingAddress.lastName,
-                line1: finalBillingAddress.address1,
+                first_name: finalBillingAddress.firstName || shippingAddress.firstName || "Customer",
+                last_name: finalBillingAddress.lastName || shippingAddress.lastName || "",
+                line1: finalBillingAddress.address1 || finalBillingAddress.street || "Main St",
                 line2: finalBillingAddress.address2 || "",
-                city: finalBillingAddress.city,
-                region: finalBillingAddress.region || finalBillingAddress.city,
+                city: finalBillingAddress.city || "Riyadh",
+                region: finalBillingAddress.region || finalBillingAddress.city || "Riyadh",
                 country_code: countryCode,
-                phone_number: formatPhone(finalBillingAddress.phone, "AE"),
+                phone_number: formatPhone(finalBillingAddress.phone, countryCode) || buyerPhone,
             },
             shipping_address: {
-                first_name: shippingAddress.firstName,
-                last_name: shippingAddress.lastName,
-                line1: shippingAddress.address1,
+                first_name: shippingAddress.firstName || "Customer",
+                last_name: shippingAddress.lastName || "",
+                line1: shippingAddress.address1 || shippingAddress.street || "Main St",
                 line2: shippingAddress.address2 || "",
-                city: shippingAddress.city,
-                region: shippingAddress.region || shippingAddress.city,
+                city: shippingAddress.city || "Riyadh",
+                region: shippingAddress.region || shippingAddress.city || "Riyadh",
                 country_code: countryCode,
                 phone_number: buyerPhone,
             },
-            // Removed explicit payment_type and instalments to allow Tamara to offer all eligible methods
-            // payment_type: "PAY_BY_INSTALMENTS",
-            // instalments: Number(instalments),
             country_code: countryCode,
-            locale: "en_AE",
+            locale: countryCode === "SA" ? "ar_SA" : "en_US",
             merchant_url: {
                 success: `${baseUrl}/checkout/verify?orderId=${orderId}&payment=tamara`,
                 cancel: `${baseUrl}/checkout/cancel?orderId=${orderId}&payment=tamara`,
