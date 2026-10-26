@@ -57,13 +57,23 @@ const SCOPE_OF_DELIVERY_OPTIONS = [
 
 const INCLUDE_ACCESSORIES = [
   "Extra Strap",
-  "Original Strap", 
+  "Original Strap",
   "Warranty Card",
   "Certificate",
   "Travel Case",
   "Bezel Protector",
   "Cleaning Cloth",
-  "Other Accessories"
+  "Other Accessories",
+  "Original Boutique Orange/Black Box",
+  "Dust Bag (Felt)",
+  "Padlock & 2 Keys with Clochette",
+  "Removable Shoulder / Crossbody Strap",
+  "Rain Protection Cover",
+  "Original Purchase Receipt / Invoice",
+  "Care Booklet & Authenticity Card",
+  "Felt Protector Insert",
+  "Dust bag",
+  "Original box"
 ];
 
 const CONDITIONS = [
@@ -71,14 +81,24 @@ const CONDITIONS = [
   "Unworn / Like New",
   "Pre-Owned",
   "Excellent",
-  "Not Working / For Parts"
+  "Not Working / For Parts",
+  "Brand New / Store Fresh",
+  "Unworn / Pristine Condition",
+  "Pre-Owned (Excellent / Like New)",
+  "Very Good Condition",
+  "Vintage / Collector Grade"
 ];
 
 const ITEM_CONDITIONS = [
   "Excellent",
-  "Good", 
+  "Good",
   "Fair",
-  "Poor / Not Working / For Parts"
+  "Poor / Not Working / For Parts",
+  "Grade A+ (Store Fresh / Pristine)",
+  "Grade A (Excellent / Minimal Wear)",
+  "Grade B+ (Very Good / Minor Signs of Use)",
+  "Grade B (Good)",
+  "Grade C (Fair)"
 ];
 
 const GENDERS = ["Men/Unisex", "Women"];

@@ -11,6 +11,7 @@ const { sendShipmentTrackingEmail } = require("../services/emailService");
 const User = require("../models/UserModel");
 const stripePkg = require("stripe");
 const axios = require("axios");
+const { validateAndPriceItems, verifyExistingOrder } = require("../utils/pricingHelper");
 
 const TABBY_BASE = process.env.TABBY_BASE_URL || "https://api.tabby.ai/api/v2";
 
@@ -20,6 +21,12 @@ const stripe = process.env.STRIPE_SECRET_KEY
     telemetry: false, // Disable background requests that can cause ECONNRESET crashes
   })
   : null;
+
+if (process.env.STRIPE_SECRET_KEY) {
+  console.log("Stripe configuration: configured");
+} else {
+  console.warn("Stripe configuration: missing");
+}
 
 const createStripeOrder = async (req, res) => {
   try {
@@ -33,8 +40,13 @@ const createStripeOrder = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized. Please log in to place an order." });
     }
 
-    if (!items?.length) return res.status(400).json({ message: "Cart items are required" });
-    if (!shippingAddress?.address1 || !shippingAddress?.city) return res.status(400).json({ message: "Valid shipping address is required" });
+    if (!existingOrderId && (!Array.isArray(items) || items.length === 0)) {
+      return res.status(400).json({ message: "Cart items are required" });
+    }
+
+    if (!shippingAddress?.address1 || !shippingAddress?.city) {
+      return res.status(400).json({ message: "Valid shipping address is required" });
+    }
 
     const finalBillingAddress = billingAddress?.address1 && billingAddress?.city ? billingAddress : shippingAddress;
 
@@ -49,7 +61,10 @@ const createStripeOrder = async (req, res) => {
       order = await Order.findById(existingOrderId);
       if (!order) return res.status(404).json({ message: "Existing order not found" });
 
-      // Use items from existing order (important for fixed offer prices)
+      // Verify ownership, payment status, and subtotal integrity
+      verifyExistingOrder(order, req.user, shippingAddress?.email);
+
+      // Use items from existing order (locking fixed accepted offer price)
       populatedItems = order.items;
       subtotal = order.subtotal;
 
@@ -57,7 +72,7 @@ const createStripeOrder = async (req, res) => {
       const calc = calculateShippingFee({ country: shippingAddress.country, subtotal });
       shippingFee = calc.shippingFee;
       region = calc.region;
-      total = subtotal + shippingFee;
+      total = Math.round((subtotal + shippingFee) * 100) / 100;
 
       if (!calculateOnly) {
         order.shippingAddress = shippingAddress;
@@ -69,29 +84,20 @@ const createStripeOrder = async (req, res) => {
         await order.save();
       }
     } else {
-      populatedItems = await Promise.all(
-        items.map(async (it) => {
-          const product = await Product.findById(it.productId).select("name images salePrice regularPrice sku").lean();
-          if (!product) throw new Error(`Product not found: ${it.productId}`);
-          return {
-            productId: product._id,
-            name: product.name,
-            image: product.images?.[0]?.url || "",
-            price: it.price || product.salePrice || product.regularPrice || 0,
-            regularPrice: product.regularPrice, // Added to capture original price
-            quantity: it.quantity || 1,
-            sku: product.sku || "",
-          };
-        })
-      );
-
-      subtotal = populatedItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
-      const originalPriceTotal = populatedItems.reduce((acc, item) => acc + (item.regularPrice || item.price) * item.quantity, 0);
+      // Validate items and enforce trusted server-side database pricing
+      const pricing = await validateAndPriceItems(items);
+      populatedItems = pricing.populatedItems;
+      subtotal = pricing.subtotal;
+      const originalPriceTotal = pricing.originalPriceTotal;
 
       const calc = calculateShippingFee({ country: shippingAddress.country, subtotal });
       shippingFee = calc.shippingFee;
       region = calc.region;
-      total = subtotal + shippingFee;
+      total = Math.round((subtotal + shippingFee) * 100) / 100;
+
+      if (!total || total <= 0 || !Number.isFinite(total)) {
+        return res.status(400).json({ success: false, message: "Invalid order total amount" });
+      }
 
       if (calculateOnly) {
         return res.status(200).json({ success: true, subtotal, originalPrice: originalPriceTotal, shippingFee, total, region, items: populatedItems });
@@ -156,7 +162,10 @@ const createStripeOrder = async (req, res) => {
 
     return res.status(201).json({ success: true, order });
   } catch (error) {
-    console.error("Stripe Create Order Error:", error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
+    console.error("Stripe Create Order Error:", error.message || "Failed to create Stripe order");
     return res.status(500).json({ message: error.message || "Server error" });
   }
 };
@@ -267,17 +276,43 @@ const getOrderById = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // ✅ SECURITY CHECK: Allow lookup by custom reference orderId (e.g. tabby_..., tamara_..., checkout success pages),
-    // or if the requester is the owner, admin, or if it's a guest order
-    const isReferenceIdLookup = !!(order.orderId && order.orderId === id) ||
-      !!(order.tabbySessionId && order.tabbySessionId === id) ||
-      !!(order.stripeSessionId && order.stripeSessionId === id) ||
-      !!(order.tamaraOrderId && order.tamaraOrderId === id);
-    const isAdmin = req.admin || (req.user && req.user.isAdmin);
-    const isGuestOrder = !order.userId;
-    const isOwner = isGuestOrder || isReferenceIdLookup || (req.user && order.userId && order.userId.toString() === req.user.userId.toString());
+    // ✅ ACCESS CONTROL & IDOR PREVENTION:
+    // Enforce strict ownership verification for both registered customer and guest orders.
+    const isAdmin = !!(req.admin || (req.user && req.user.isAdmin));
+    let isAuthorized = false;
 
-    if (!isOwner && !isAdmin) {
+    if (isAdmin) {
+      isAuthorized = true;
+    } else if (order.userId) {
+      // Registered User Order: strictly verify authenticated owner identity
+      isAuthorized = !!(req.user && order.userId.toString() === req.user.userId.toString());
+    } else {
+      // Guest Order: do NOT treat absence of userId as proof of ownership!
+      // Require one of the established secure ownership verification mechanisms:
+      // 1. Direct secret payment session ID lookup (issued during checkout redirect)
+      const isPaymentSessionLookup = !!(
+        (order.stripeSessionId && order.stripeSessionId === id) ||
+        (order.tabbySessionId && order.tabbySessionId === id) ||
+        (order.tamaraOrderId && order.tamaraOrderId === id)
+      );
+
+      // 2. Secure guestToken verification
+      const providedGuestToken = req.query?.token || req.headers?.["x-guest-token"] || req.body?.guestToken;
+      const hasValidGuestToken = !!(order.guestToken && providedGuestToken && order.guestToken === providedGuestToken);
+
+      // 3. Legitimate order tracking / reference lookup verified with customer email
+      const providedEmail = (req.query?.email || req.headers?.["x-guest-email"] || req.body?.email || "").trim().toLowerCase();
+      const customerShippingEmail = (order.shippingAddress?.email || "").trim().toLowerCase();
+      const customerBillingEmail = (order.billingAddress?.email || "").trim().toLowerCase();
+      const hasMatchingEmail = !!(providedEmail && (providedEmail === customerShippingEmail || providedEmail === customerBillingEmail));
+
+      // Reference ID / sequential orderNumber / mongo id lookup
+      const isReferenceIdLookup = !!(order.orderId && order.orderId === id) || !!(order.orderNumber && order.orderNumber === id);
+
+      isAuthorized = isPaymentSessionLookup || hasValidGuestToken || (hasMatchingEmail && (isReferenceIdLookup || String(order._id) === id));
+    }
+
+    if (!isAuthorized) {
       return res.status(403).json({ message: "You are not authorized to view this order" });
     }
 
@@ -516,7 +551,7 @@ const getOrderById = async (req, res) => {
 
     return res.json({ order });
   } catch (error) {
-    console.error("Get Order Error:", error);
+    console.error("Get Order Error:", error.message || "Server error");
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -572,29 +607,25 @@ const getMyOrders = async (req, res) => {
 
 const calculateShipping = async (req, res) => {
   try {
-    const { items, country, subtotal: passedSubtotal } = req.body;
+    const { items, country, subtotal: passedSubtotal, existingOrderId } = req.body;
 
     if (!country) {
       return res.status(400).json({ success: false, message: "Country is required" });
     }
 
-    let subtotal = passedSubtotal;
+    let subtotal = 0;
 
-    // If subtotal not provided, calculate it from items
-    if (subtotal === undefined || subtotal === null) {
-      if (!items || !items.length) {
-        return res.status(400).json({ success: false, message: "Items or subtotal required" });
-      }
-
-      const populatedItems = await Promise.all(
-        items.map(async (it) => {
-          const product = await Product.findById(it.productId).select("salePrice regularPrice").lean();
-          if (!product) throw new Error(`Product not found: ${it.productId}`);
-          const price = product.salePrice || product.regularPrice || 0;
-          return { price, quantity: it.quantity || 1 };
-        })
-      );
-      subtotal = populatedItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
+    if (existingOrderId) {
+      const order = await Order.findById(existingOrderId).select("subtotal").lean();
+      if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+      subtotal = order.subtotal;
+    } else if (Array.isArray(items) && items.length > 0) {
+      const pricing = await validateAndPriceItems(items);
+      subtotal = pricing.subtotal;
+    } else if (typeof passedSubtotal === "number" && passedSubtotal >= 0) {
+      subtotal = passedSubtotal;
+    } else {
+      return res.status(400).json({ success: false, message: "Valid items or order required" });
     }
 
     const { shippingFee, region, threshold } = calculateShippingFee({ country, subtotal });
@@ -608,8 +639,8 @@ const calculateShipping = async (req, res) => {
       threshold
     });
   } catch (error) {
-    console.error("Calculate Shipping Error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Server error" });
+    console.error("Calculate Shipping Error:", error.message || "Server error");
+    return res.status(error.statusCode || 500).json({ success: false, message: error.message || "Server error" });
   }
 };
 

@@ -54,18 +54,32 @@ const parseJSON = (field) => {
 };
 
 const parseNumber = (val) => {
+  if (Array.isArray(val)) val = val.length > 0 ? val[val.length - 1] : 0;
   if (val === undefined || val === null || val === "") return 0;
   const parsed = parseFloat(val);
   return isNaN(parsed) ? 0 : parsed;
 };
 
 const parseIntNum = (val) => {
+  if (Array.isArray(val)) val = val.length > 0 ? val[val.length - 1] : 0;
   if (val === undefined || val === null || val === "") return 0;
   const parsed = parseInt(val, 10);
   return isNaN(parsed) ? 0 : parsed;
 };
 
-const parseBoolean = (val) => val === "true" || val === true;
+const parseBoolean = (val) => {
+  if (Array.isArray(val)) val = val.length > 0 ? val[val.length - 1] : false;
+  return val === "true" || val === true;
+};
+
+const parseString = (val) => {
+  if (val === undefined || val === null) return "";
+  if (Array.isArray(val)) val = val.length > 0 ? val[val.length - 1] : "";
+  if (typeof val === "object") {
+    val = val.name || val.title || val.value || val.label || "";
+  }
+  return typeof val === "string" ? val.trim() : String(val).trim();
+};
 
 const parseCondition = (value) => {
   if (!value) return "";
@@ -78,7 +92,7 @@ const parseCondition = (value) => {
       return value;
     }
   }
-  return value;
+  return typeof value === "string" ? value.trim() : String(value);
 };
 
 // =============================
@@ -131,7 +145,7 @@ const addProduct = async (req, res) => {
       scopeOfDeliveryWatch: parseJSON(productData.scopeOfDeliveryWatch),
       includedAccessories: parseJSON(productData.includedAccessories),
 
-      category: productData.category,
+      category: parseString(productData.category),
 
       condition: parseCondition(productData.condition),
       itemCondition: parseCondition(productData.itemCondition),
@@ -174,8 +188,8 @@ const addProduct = async (req, res) => {
       hardwareColor: productData.hardwareColor || "",
       leatherSize: productData.leatherSize || undefined,
       strapLength: parseNumber(productData.strapLength) || undefined,
-      leatherAccessories: parseJSON(productData.leatherAccessories),
-      scopeOfDelivery: parseJSON(productData.scopeOfDelivery),
+      leatherAccessories: parseJSON(productData.leatherAccessories || productData.includedAccessories),
+      scopeOfDelivery: parseJSON(productData.scopeOfDelivery || productData.scopeOfDeliveryLeather),
 
       // Accessory Fields
       accessoryCategory: productData.accessoryCategory || "",
@@ -292,9 +306,9 @@ const updateProduct = async (req, res) => {
     }
 
     // Generate product name
-    const brand = req.body.brand || product.brand;
-    const model = req.body.model || product.model;
-    const productName = `${brand} ${model}`;
+    const brand = parseString(req.body.brand) || product.brand;
+    const model = parseString(req.body.model) || product.model;
+    const productName = `${brand} ${model}`.trim();
 
     // Stock & inStock
     let stockQuantity = req.body.stockQuantity !== undefined ? parseIntNum(req.body.stockQuantity) : product.stockQuantity;
@@ -308,27 +322,28 @@ const updateProduct = async (req, res) => {
     // Build updated fields safely
     const updatedFields = {
       name: productName,
-      ...(req.body.brand && { brand: req.body.brand }),
-      ...(req.body.model && { model: req.body.model }),
-      ...(req.body.sku && { sku: req.body.sku }),
-      ...(req.body.referenceNumber && { referenceNumber: req.body.referenceNumber }),
-      ...(req.body.serialNumber && { serialNumber: req.body.serialNumber }),
-      ...(req.body.additionalTitle && { additionalTitle: req.body.additionalTitle }),
-      ...(req.body.watchType && { watchType: req.body.watchType }),
-      ...(req.body.watchStyle && { watchStyle: req.body.watchStyle }),
+      ...(req.body.brand && { brand: parseString(req.body.brand) }),
+      ...(req.body.model && { model: parseString(req.body.model) }),
+      ...(req.body.sku && { sku: parseString(req.body.sku) }),
+      ...(req.body.referenceNumber && { referenceNumber: parseString(req.body.referenceNumber) }),
+      ...(req.body.serialNumber && { serialNumber: parseString(req.body.serialNumber) }),
+      ...(req.body.additionalTitle && { additionalTitle: parseString(req.body.additionalTitle) }),
+      ...(req.body.watchType && { watchType: parseString(req.body.watchType) }),
+      ...(req.body.watchStyle && { watchStyle: parseString(req.body.watchStyle) }),
       ...(req.body.scopeOfDeliveryWatch && {
         scopeOfDeliveryWatch: parseJSON(req.body.scopeOfDeliveryWatch),
       }),
       ...(req.body.includedAccessories && {
         includedAccessories: parseJSON(req.body.includedAccessories),
+        leatherAccessories: parseJSON(req.body.includedAccessories),
       }),
-      ...(req.body.category && { category: req.body.category }),
+      ...(req.body.category && { category: parseString(req.body.category) }),
       ...(req.body.condition && { condition: req.body.condition }),
       ...(req.body.itemCondition && { itemCondition: req.body.itemCondition }),
       ...(req.body.limitedEdition !== undefined && {
         limitedEdition: parseBoolean(req.body.limitedEdition),
       }),
-      ...(req.body.productionYear && { productionYear: req.body.productionYear }),
+      ...(req.body.productionYear && { productionYear: parseString(req.body.productionYear) }),
       ...(req.body.approximateYear !== undefined && {
         approximateYear: parseBoolean(req.body.approximateYear),
       }),
@@ -338,66 +353,67 @@ const updateProduct = async (req, res) => {
       ...(req.body.deliveryDays !== undefined && {
         deliveryDays: parseIntNum(req.body.deliveryDays),
       }),
-      ...(req.body.gender && { gender: req.body.gender }),
-      ...(req.body.movement && { movement: req.body.movement }),
+      ...(req.body.gender && { gender: parseString(req.body.gender) }),
+      ...(req.body.movement && { movement: parseString(req.body.movement) }),
 
       // ✅ Safe enum handling for dialColor
-      ...(req.body.dialColor !== undefined && req.body.dialColor.trim() !== '' && {
-        dialColor: req.body.dialColor,
+      ...(req.body.dialColor !== undefined && parseString(req.body.dialColor) !== '' && {
+        dialColor: parseString(req.body.dialColor),
       }),
 
-      ...(req.body.caseMaterial && { caseMaterial: req.body.caseMaterial }),
-      ...(req.body.strapMaterial && { strapMaterial: req.body.strapMaterial }),
-      ...(req.body.strapColor && req.body.strapColor.trim() !== '' && { strapColor: req.body.strapColor }),
+      ...(req.body.caseMaterial && { caseMaterial: parseString(req.body.caseMaterial) }),
+      ...(req.body.strapMaterial && { strapMaterial: parseString(req.body.strapMaterial) }),
+      ...(req.body.strapColor && parseString(req.body.strapColor) !== '' && { strapColor: parseString(req.body.strapColor) }),
       ...(req.body.badges && { badges: parseJSON(req.body.badges) }),
       ...(req.body.strapSize !== undefined && { strapSize: parseNumber(req.body.strapSize) }),
       ...(req.body.caseSize !== undefined && { caseSize: parseNumber(req.body.caseSize) }),
-      ...(req.body.caseColor && req.body.caseColor.trim() !== '' && { caseColor: req.body.caseColor }),
-      ...(req.body.crystal && { crystal: req.body.crystal }),
-      ...(req.body.bezelMaterial && { bezelMaterial: req.body.bezelMaterial }),
-      ...(req.body.dialNumerals && { dialNumerals: req.body.dialNumerals }),
-      ...(req.body.caliber && { caliber: req.body.caliber }),
+      ...(req.body.caseColor && parseString(req.body.caseColor) !== '' && { caseColor: parseString(req.body.caseColor) }),
+      ...(req.body.crystal && { crystal: parseString(req.body.crystal) }),
+      ...(req.body.bezelMaterial && { bezelMaterial: parseString(req.body.bezelMaterial) }),
+      ...(req.body.dialNumerals && { dialNumerals: parseString(req.body.dialNumerals) }),
+      ...(req.body.caliber && { caliber: parseString(req.body.caliber) }),
       ...(req.body.powerReserve !== undefined && { powerReserve: parseNumber(req.body.powerReserve) }),
       ...(req.body.jewels !== undefined && { jewels: parseIntNum(req.body.jewels) }),
       ...(req.body.functions && { functions: parseJSON(req.body.functions) }),
       ...(req.body.replacementParts && { replacementParts: parseJSON(req.body.replacementParts) }),
 
       // Leather Goods Fields
-      ...(req.body.leatherMainCategory !== undefined && { leatherMainCategory: req.body.leatherMainCategory }),
-      ...(req.body.leatherSubCategory !== undefined && { leatherSubCategory: req.body.leatherSubCategory }),
-      ...(req.body.modelCode !== undefined && { modelCode: req.body.modelCode }),
-      ...(req.body.leatherMaterial !== undefined && { leatherMaterial: req.body.leatherMaterial }),
-      ...(req.body.interiorMaterial !== undefined && { interiorMaterial: req.body.interiorMaterial }),
-      ...(req.body.hardwareColor !== undefined && { hardwareColor: req.body.hardwareColor }),
-      ...(req.body.leatherSize !== undefined && { leatherSize: req.body.leatherSize }),
+      ...(req.body.leatherMainCategory !== undefined && { leatherMainCategory: parseString(req.body.leatherMainCategory) }),
+      ...(req.body.leatherSubCategory !== undefined && { leatherSubCategory: parseString(req.body.leatherSubCategory) }),
+      ...(req.body.modelCode !== undefined && { modelCode: parseString(req.body.modelCode) }),
+      ...(req.body.leatherMaterial !== undefined && { leatherMaterial: parseString(req.body.leatherMaterial) }),
+      ...(req.body.interiorMaterial !== undefined && { interiorMaterial: parseString(req.body.interiorMaterial) }),
+      ...(req.body.hardwareColor !== undefined && { hardwareColor: parseString(req.body.hardwareColor) }),
+      ...(req.body.leatherSize !== undefined && { leatherSize: parseString(req.body.leatherSize) }),
       ...(req.body.strapLength !== undefined && { strapLength: parseNumber(req.body.strapLength) }),
       ...(req.body.leatherAccessories && { leatherAccessories: parseJSON(req.body.leatherAccessories) }),
       ...(req.body.scopeOfDelivery && { scopeOfDelivery: parseJSON(req.body.scopeOfDelivery) }),
+      ...(req.body.scopeOfDeliveryLeather && !req.body.scopeOfDelivery && { scopeOfDelivery: parseJSON(req.body.scopeOfDeliveryLeather) }),
 
       // Accessory Fields
-      ...(req.body.accessoryCategory !== undefined && { accessoryCategory: req.body.accessoryCategory }),
-      ...(req.body.accessorySubCategory !== undefined && { accessorySubCategory: req.body.accessorySubCategory }),
-      ...(req.body.accessoryName !== undefined && { accessoryName: req.body.accessoryName }),
+      ...(req.body.accessoryCategory !== undefined && { accessoryCategory: parseString(req.body.accessoryCategory) }),
+      ...(req.body.accessorySubCategory !== undefined && { accessorySubCategory: parseString(req.body.accessorySubCategory) }),
+      ...(req.body.accessoryName !== undefined && { accessoryName: parseString(req.body.accessoryName) }),
       ...(req.body.accessoryMaterial && { accessoryMaterial: parseJSON(req.body.accessoryMaterial) }),
       ...(req.body.accessoryColor && { accessoryColor: parseJSON(req.body.accessoryColor) }),
       ...(req.body.accessoryDelivery && { accessoryDelivery: parseJSON(req.body.accessoryDelivery) }),
       ...(req.body.accessoryScopeOfDelivery && { accessoryScopeOfDelivery: parseJSON(req.body.accessoryScopeOfDelivery) }),
 
       // Legacy / helper category fields
-      ...(req.body.categorisOne !== undefined && { categorisOne: req.body.categorisOne }),
+      ...(req.body.categorisOne !== undefined && { categorisOne: parseString(req.body.categorisOne) }),
       ...(req.body.subcategory && { subcategory: parseJSON(req.body.subcategory) }),
-      ...(req.body.conditionNotes !== undefined && { conditionNotes: req.body.conditionNotes }),
-      ...(req.body.color !== undefined && { color: req.body.color }),
+      ...(req.body.conditionNotes !== undefined && { conditionNotes: parseString(req.body.conditionNotes) }),
+      ...(req.body.color !== undefined && { color: parseString(req.body.color) }),
 
       ...(req.body.regularPrice !== undefined && { regularPrice: parseNumber(req.body.regularPrice) }),
       ...(req.body.salePrice !== undefined && { salePrice: parseNumber(req.body.salePrice) }),
-      ...(req.body.taxStatus && { taxStatus: req.body.taxStatus }),
+      ...(req.body.taxStatus && { taxStatus: parseString(req.body.taxStatus) }),
       stockQuantity,
       inStock,
-      ...(req.body.description && { description: req.body.description }),
-      ...(req.body.visibility && { visibility: req.body.visibility }),
-      ...(req.body.seoTitle && { seoTitle: req.body.seoTitle }),
-      ...(req.body.seoDescription && { seoDescription: req.body.seoDescription }),
+      ...(req.body.description && { description: parseString(req.body.description) }),
+      ...(req.body.visibility && { visibility: parseString(req.body.visibility) }),
+      ...(req.body.seoTitle && { seoTitle: parseString(req.body.seoTitle) }),
+      ...(req.body.seoDescription && { seoDescription: parseString(req.body.seoDescription) }),
       ...(req.body.seoKeywords && { seoKeywords: parseJSON(req.body.seoKeywords) }),
       ...(req.body.published !== undefined && { published: parseBoolean(req.body.published) }),
       ...(req.body.featured !== undefined && { featured: parseBoolean(req.body.featured) }),

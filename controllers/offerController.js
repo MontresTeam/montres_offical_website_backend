@@ -473,11 +473,21 @@ const verifyOfferToken = async (req, res) => {
 // @route   POST /api/offers/counter-response
 const respondToCounterOffer = async (req, res) => {
     try {
-        const { offerId, action, newOfferAmount } = req.body;
+        const { offerId, action, newOfferAmount, token } = req.body;
         const offer = await Offer.findById(offerId).populate("product");
 
         if (!offer) {
             return res.status(404).json({ success: false, message: "Offer not found" });
+        }
+
+        // ✅ IDOR PREVENTION & OWNERSHIP VALIDATION
+        const isAdmin = !!(req.admin || (req.user && req.user.isAdmin));
+        const isOwner = !!(req.user && offer.user && offer.user.toString() === req.user.userId.toString());
+        const providedToken = token || req.query?.token || req.headers?.["x-offer-token"];
+        const hasValidToken = !!(providedToken && offer.token && providedToken === offer.token);
+
+        if (!isAdmin && !isOwner && !hasValidToken) {
+            return res.status(403).json({ success: false, message: "You are not authorized to respond to this counter offer" });
         }
 
         if (action === "accept") {
@@ -609,10 +619,12 @@ const respondToCounterOffer = async (req, res) => {
 };
 
 // @desc    Get user's offer history
-// @route   GET /api/offers/user
+// @route   GET /api/offers/user/offers
 const getUserOffers = async (req, res) => {
     try {
-        const userId = req.user?.userId || req.query.userId;
+        // Enforce authenticated customer identity; do not allow customers to override with req.query.userId
+        const isAdmin = !!(req.admin || (req.user && req.user.isAdmin));
+        const userId = (isAdmin && req.query?.userId) ? req.query.userId : req.user?.userId;
         if (!userId) {
             return res.status(401).json({ success: false, message: "User identification required" });
         }
@@ -639,6 +651,16 @@ const getOfferById = async (req, res) => {
             return res.status(404).json({ success: false, message: "Offer not found" });
         }
 
+        // ✅ IDOR PREVENTION & OWNERSHIP VALIDATION
+        const isAdmin = !!(req.admin || (req.user && req.user.isAdmin));
+        const isOwner = !!(req.user && offer.user && offer.user.toString() === req.user.userId.toString());
+        const providedToken = req.query?.token || req.headers?.["x-offer-token"] || req.body?.token;
+        const hasValidToken = !!(providedToken && offer.token && providedToken === offer.token);
+
+        if (!isAdmin && !isOwner && !hasValidToken) {
+            return res.status(403).json({ success: false, message: "You are not authorized to view this offer" });
+        }
+
         res.status(200).json({
             success: true,
             data: offer
@@ -648,7 +670,38 @@ const getOfferById = async (req, res) => {
     }
 };
 
+
+// @desc    Reopen an offer as pending (Admin Only)
+// @route   POST /api/admin/offers/reopen
+const reopenOffer = async (req, res) => {
+    try {
+        const { id } = req.body;
+        const offer = await Offer.findById(id).populate("product");
+
+        if (!offer) {
+            return res.status(404).json({ message: "Offer not found" });
+        }
+
+        offer.status = "pending";
+        // Extend expiry by 30 days
+        const newExpiry = new Date();
+        newExpiry.setDate(newExpiry.getDate() + 30);
+        offer.expiresAt = newExpiry;
+        await offer.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Offer reopened as pending",
+            data: offer,
+        });
+    } catch (error) {
+        console.error("Reopen offer error:", error);
+        res.status(500).json({ success: false, message: "Error reopening offer", error: error.message });
+    }
+};
+
 module.exports = {
+    reopenOffer,
     createOffer,
     getOffers,
     acceptOffer,

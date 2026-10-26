@@ -69,6 +69,9 @@ connectDB();
 
 const app = express();
 
+// Trust first proxy hop (Nginx) for accurate client IP in rate limiting
+app.set("trust proxy", 1);
+
 // ✅ CORS setup
 const allowedOrigins = [
   process.env.CLIENT_URL,

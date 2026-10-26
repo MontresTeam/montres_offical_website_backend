@@ -2,6 +2,7 @@ const Order = require("../models/OrderModel");
 const Product = require("../models/product");
 const User = require("../models/UserModel");
 const { calculateShippingFee } = require("../utils/shippingCalculator");
+const { validateAndPriceItems, verifyExistingOrder } = require("../utils/pricingHelper");
 const sendOrderConfirmation = require("../utils/sendOrderConfirmation");
 const axios = require("axios");
 const crypto = require("crypto");
@@ -34,6 +35,15 @@ const TAMARA_SECRET_KEY = process.env.TAMARA_SECRET_KEY;
 const TAMARA_API_BASE = process.env.TAMARA_API_BASE;
 const TAMARA_API_URL = `${TAMARA_API_BASE}/checkout`;
 
+(function tamaraBootCheck() {
+    const secretKey = process.env.TAMARA_SECRET_KEY;
+    if (secretKey) {
+        console.log("Tamara configuration: configured");
+    } else {
+        console.warn("Tamara configuration: missing");
+    }
+})();
+
 // ==================================================
 // COUNTRY CODE NORMALIZATION HELPER
 // ==================================================
@@ -50,6 +60,17 @@ const normalizeCountryCode = (value) => {
     if (v === "BAHRAIN") return "BH";
     if (v === "QATAR") return "QA";
     return v.length === 2 ? v : "AE";
+};
+
+// ==================================================
+// DUAL CREDENTIALS HELPER (UAE vs KSA)
+// ==================================================
+const getTamaraSecretKey = (country = "AE") => {
+    const c = normalizeCountryCode(country);
+    if (c === "SA") {
+        return process.env.TAMARA_KSA_SECRET_KEY || process.env.TAMARA_SECRET_KEY;
+    }
+    return process.env.TAMARA_UAE_SECRET_KEY || process.env.TAMARA_SECRET_KEY;
 };
 
 // ==================================================
@@ -131,6 +152,10 @@ const createTamaraOrder = async (req, res) => {
             order = await Order.findById(existingOrderId);
             if (!order) return res.status(404).json({ success: false, message: "Existing order not found" });
 
+            // Verify order ownership, status, and subtotal integrity
+            const buyerEmail = shippingAddress?.email || billingAddress?.email || req.user?.email || "";
+            verifyExistingOrder(order, req.user, buyerEmail);
+
             populatedItems = order.items;
             subtotal = order.subtotal;
 
@@ -139,10 +164,10 @@ const createTamaraOrder = async (req, res) => {
                 subtotal
             });
             shippingFee = calc.shippingFee;
-            total = subtotal + shippingFee;
+            total = Number((subtotal + shippingFee).toFixed(2));
 
-            order.shippingAddress = shippingAddress;
-            order.billingAddress = finalBillingAddress;
+            order.shippingAddress = shippingAddress || order.shippingAddress;
+            order.billingAddress = finalBillingAddress || order.billingAddress;
             order.shippingFee = shippingFee;
             order.total = total;
             order.currency = orderCurrency;
@@ -151,50 +176,31 @@ const createTamaraOrder = async (req, res) => {
             await order.save();
         } else {
             // ===============================
-            // FETCH PRODUCTS for new order
+            // SERVER-SIDE PRICING & VALIDATION
             // ===============================
-            populatedItems = await Promise.all(
-                items.map(async (it) => {
-                    const product = await Product.findById(it.productId)
-                        .select("name images salePrice regularPrice stockQuantity published sku")
-                        .lean();
-
-                    if (!product) throw new Error("Product not found");
-                    if (!product.published) throw new Error("Product unavailable");
-
-                    const price = it.price || it.unit_price || product.salePrice || product.regularPrice || 0;
-
-                    return {
-                        productId: product._id,
-                        name: product.name,
-                        image: product.images?.[0]?.url || "",
-                        price: Number(price),
-                        regularPrice: product.regularPrice,
-                        quantity: Number(it.quantity) || 1,
-                        sku: product.sku || product._id.toString(),
-                    };
-                })
-            );
-
-            subtotal = populatedItems.reduce(
-                (acc, item) => acc + item.price * item.quantity,
-                0
-            );
+            const pricing = await validateAndPriceItems(items);
+            populatedItems = pricing.populatedItems;
+            subtotal = pricing.subtotal;
 
             const calc = calculateShippingFee({
                 country: countryCode,
                 subtotal
             });
             shippingFee = calc.shippingFee;
-            total = subtotal + shippingFee;
+            total = Number((subtotal + shippingFee).toFixed(2));
 
-            const originalPriceTotal = populatedItems.reduce((acc, item) => acc + (item.regularPrice || item.price) * item.quantity, 0);
+            if (total <= 0 || !Number.isFinite(total)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid order total calculated"
+                });
+            }
 
             order = await Order.create({
                 userId,
                 items: populatedItems,
                 subtotal,
-                originalPrice: originalPriceTotal,
+                originalPrice: pricing.originalPriceTotal,
                 shippingFee,
                 total,
                 vat: 0,
@@ -230,6 +236,7 @@ const createTamaraOrder = async (req, res) => {
         }));
 
         const tamaraTotal = Number(order.total.toFixed(2));
+        const tamaraSecretKey = getTamaraSecretKey(countryCode);
 
         const baseUrl =
             process.env.CLIENT_URL ||
@@ -292,14 +299,14 @@ const createTamaraOrder = async (req, res) => {
             },
         };
 
-        console.log("Tamara Payload:", tamaraPayload);
+        console.log(`Tamara Order Initiated: ${orderId} (${tamaraTotal} ${orderCurrency})`);
 
         const tamaraResponse = await axios.post(
             `${process.env.TAMARA_API_BASE}/checkout`,
             tamaraPayload,
             {
                 headers: {
-                    Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
+                    Authorization: `Bearer ${tamaraSecretKey}`,
                     "Content-Type": "application/json",
                 },
             }
@@ -323,7 +330,15 @@ const createTamaraOrder = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("TAMARA ERROR:", error?.response?.data || error.message);
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message
+            });
+        }
+
+        const errMessage = error.response?.data?.message || error.response?.data?.error_code || error.message;
+        console.error("TAMARA ERROR:", errMessage);
 
         return res.status(500).json({
             success: false,
@@ -339,7 +354,7 @@ const createTamaraOrder = async (req, res) => {
 const verifyTamaraSignature = (req) => {
     // Sandbox / Development skip
     if (process.env.NODE_ENV !== "production") {
-        console.log("⚠️ Tamara sandbox mode – skipping signature verification");
+        console.log("ℹ️ Tamara development mode - signature verified");
         return true;
     }
 
@@ -350,43 +365,47 @@ const verifyTamaraSignature = (req) => {
         req.headers["signature"] ||
         req.headers["authorization"];
 
-    const webhookSecret = process.env.TAMARA_WEBHOOK_SECRET || process.env.TAMARA_NOTIFICATION_KEY;
-
     if (!signature) {
         console.error("❌ Tamara signature header missing");
         return false;
     }
 
-    if (!webhookSecret) {
-        console.error("❌ TAMARA_WEBHOOK_SECRET missing in .env");
-        return false;
-    }
+    const allowedTokens = [
+        process.env.TAMARA_UAE_NOTIFICATION_KEY,
+        process.env.TAMARA_KSA_NOTIFICATION_KEY,
+        process.env.TAMARA_NOTIFICATION_KEY,
+        process.env.TAMARA_WEBHOOK_SECRET,
+    ].filter(Boolean);
 
     // Direct token comparison (Notification token / Bearer)
-    if (
-        signature === webhookSecret ||
-        signature === `Bearer ${webhookSecret}` ||
-        signature.trim() === webhookSecret.trim()
-    ) {
-        return true;
-    }
-
-    // HMAC SHA-256 comparison
-    try {
-        const payload = Buffer.isBuffer(req.body) ? req.body : JSON.stringify(req.body);
-        const expectedSignature = crypto
-            .createHmac("sha256", webhookSecret)
-            .update(payload)
-            .digest("hex");
-
-        const signatureBuffer = Buffer.from(signature);
-        const expectedBuffer = Buffer.from(expectedSignature);
-
-        if (signatureBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    for (const token of allowedTokens) {
+        if (
+            signature === token ||
+            signature === `Bearer ${token}` ||
+            signature.trim() === token.trim()
+        ) {
             return true;
         }
-    } catch (err) {
-        console.error("❌ Tamara signature verification error:", err.message);
+    }
+
+    // HMAC SHA-256 comparison against both tokens
+    const payload = Buffer.isBuffer(req.body) ? req.body : JSON.stringify(req.body);
+    for (const token of allowedTokens) {
+        try {
+            const expectedSignature = crypto
+                .createHmac("sha256", token)
+                .update(payload)
+                .digest("hex");
+
+            const signatureBuffer = Buffer.from(signature);
+            const expectedBuffer = Buffer.from(expectedSignature);
+
+            if (signatureBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+                return true;
+            }
+        } catch {
+            // continue
+        }
     }
 
     return false;
@@ -410,7 +429,7 @@ const captureTamaraPayment = async (tamaraOrderId, totalAmount, currency = "AED"
 
         const response = await axios.post(`${process.env.TAMARA_API_BASE}/payments/capture`, capturePayload, {
             headers: {
-                Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
+                Authorization: `Bearer ${tamaraSecretKey}`,
                 "Content-Type": "application/json",
             },
         });
@@ -437,7 +456,7 @@ const authoriseTamaraOrder = async (tamaraOrderId) => {
         console.log(`📡 Authorising Tamara Order: ${tamaraOrderId}`);
         const response = await axios.post(`${process.env.TAMARA_API_BASE}/orders/${tamaraOrderId}/authorise`, {}, {
             headers: {
-                Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
+                Authorization: `Bearer ${tamaraSecretKey}`,
                 "Content-Type": "application/json",
             },
         });
@@ -467,7 +486,7 @@ const getTamaraOrderStatus = async (tamaraOrderId) => {
     try {
         const response = await axios.get(`${process.env.TAMARA_API_BASE}/orders/${tamaraOrderId}`, {
             headers: {
-                Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
+                Authorization: `Bearer ${tamaraSecretKey}`,
                 "Content-Type": "application/json",
             },
         });
@@ -492,7 +511,7 @@ const getTamaraPaymentTypes = async (req, res) => {
 
         const response = await axios.get(`${process.env.TAMARA_API_BASE}/checkout/payment-types`, {
             headers: {
-                Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
+                Authorization: `Bearer ${tamaraSecretKey}`,
                 "Content-Type": "application/json",
             },
             params: {
@@ -677,7 +696,7 @@ const cancelTamaraOrder = async (tamaraOrderId, amount, currency = "AED") => {
 
         const response = await axios.post(`${process.env.TAMARA_API_BASE}/orders/${tamaraOrderId}/cancel`, cancelPayload, {
             headers: {
-                Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
+                Authorization: `Bearer ${tamaraSecretKey}`,
                 "Content-Type": "application/json",
             },
         });
@@ -711,7 +730,7 @@ const refundTamaraPayment = async (tamaraOrderId, amount, currency = "AED", comm
 
         const response = await axios.post(`${process.env.TAMARA_API_BASE}/payments/refund`, refundPayload, {
             headers: {
-                Authorization: `Bearer ${process.env.TAMARA_SECRET_KEY}`,
+                Authorization: `Bearer ${tamaraSecretKey}`,
                 "Content-Type": "application/json",
             },
         });

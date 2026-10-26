@@ -8,34 +8,27 @@ const Customer = require("../models/customersModal");
 const Product = require("../models/product");
 const shippingCalculator = require("../utils/shippingCalculator");
 const sendOrderConfirmation = require("../utils/sendOrderConfirmation");
+const { validateAndPriceItems, verifyExistingOrder } = require("../utils/pricingHelper");
 
 const TABBY_BASE = process.env.TABBY_BASE_URL || "https://api.tabby.ai/api/v2";
 
 // ─────────────────────────────────────────────────────────────
-// 🔍 BOOT CHECK — validate all Tabby env vars at server start
+// 🔍 BOOT CHECK — validate Tabby configuration at server start
 // ─────────────────────────────────────────────────────────────
 (function tabbyBootCheck() {
   const secretKey = process.env.TABBY_SECRET_KEY;
-  const publicKey = process.env.TABBY_PUBLIC_KEY;
   const merchantCode = process.env.TABBY_MERCHANT_CODE;
 
-  console.log("\n══════════════════════════════════════");
-  console.log("   🟡 TABBY MODULE BOOT CHECK");
-  console.log("══════════════════════════════════════");
-  console.log(`  TABBY_BASE_URL  : ${TABBY_BASE}`);
-  console.log(`  TABBY_SECRET_KEY: ${secretKey ? secretKey.substring(0, 12) + "..." + secretKey.slice(-4) : "❌ NOT SET"}`);
-  console.log(`  TABBY_PUBLIC_KEY: ${publicKey ? publicKey.substring(0, 12) + "..." + publicKey.slice(-4) : "❌ NOT SET"}`);
-  console.log(`  MERCHANT_CODE   : ${merchantCode || "❌ NOT SET"}`);
-
-  const mode = secretKey?.startsWith("sk_test_") ? "SANDBOX" : secretKey?.startsWith("sk_live_") ? "LIVE" : "UNKNOWN";
-  console.log(`  KEY MODE        : ${mode === "UNKNOWN" ? "❌ " : ""}${mode}`);
-
-  if (!secretKey) console.error("  ❌ CRITICAL: TABBY_SECRET_KEY is missing — all Tabby API calls will fail!");
-  if (!merchantCode) console.error("  ❌ CRITICAL: TABBY_MERCHANT_CODE is missing!");
-  if (mode === "UNKNOWN") console.warn("  ⚠️  Key does not start with sk_test_ or sk_live_ — check your key!");
-
-  console.log("══════════════════════════════════════\n");
-})()
+  if (secretKey && merchantCode) {
+    console.log("Tabby configuration: configured");
+  } else {
+    const missing = [
+      !secretKey && "TABBY_SECRET_KEY",
+      !merchantCode && "TABBY_MERCHANT_CODE",
+    ].filter(Boolean).join(", ");
+    console.warn(`Tabby configuration: missing (${missing})`);
+  }
+})();
 
 // ----------------- Helpers -----------------
 
@@ -140,7 +133,7 @@ const verifyTabbySignature = (req) => {
     console.error("Tabby Signature verification error:", e);
   }
 
-  console.warn(`❌ Tabby Signature Mismatch. Received: ${signature}`);
+  console.warn("❌ Tabby Signature Mismatch.");
   return false;
 };
 
@@ -433,15 +426,11 @@ const preScoring = async (req, res) => {
     const endpoint = `${TABBY_BASE}/pre-scoring`;
     console.log(`  [3] ✅ Endpoint: POST ${endpoint}`);
 
-    // ✅ [4] Check correct secret key
-    const sk = process.env.TABBY_SECRET_KEY || "";
-    const skMode = sk.startsWith("sk_test_") ? "SANDBOX" : sk.startsWith("sk_live_") ? "LIVE" : "UNKNOWN";
-    console.log(`  [4] ✅ Secret key: ${sk ? sk.substring(0, 12) + "..." + sk.slice(-4) : "❌ MISSING"} [${skMode}]`);
+    // ✅ [4] Check secret key is configured
+    const sk = process.env.TABBY_SECRET_KEY;
     if (!sk) throw new Error("TABBY_SECRET_KEY is not defined in environment variables");
 
-    // 📦 Full payload log
-    console.log("  [5] 📦 FULL TABBY PRE-SCORING PAYLOAD:");
-    console.log(JSON.stringify(tabbyPayload, null, 2));
+    console.log(`  [5] Pre-scoring for amount: ${tabbyPayload.payment.amount} ${tabbyPayload.payment.currency}`);
 
     // ✅ [2] Confirm request is being sent
     console.log("  [2] 🚀 Sending request to Tabby API...");
@@ -502,8 +491,8 @@ const preScoring = async (req, res) => {
     if (!eligible && rawReason) {
       if (rawReason === "order_amount_too_high" || rawReason === "order_limit_reached" || rawReason === "limit_exceeded" || rawReason === "monthly_limit_exceeded") {
         rejectionMessage = isAr
-          ? "قيمة الطلب تفوق الحد الأقصى المسموح به حاليًا مع تابي. يُرجى تخفيض قيمة السلة أو استخدام وسيلة دفع أخرى."
-          : "This purchase is above your current spending limit with Tabby, try a smaller cart or use another payment method";
+          ? "قيمة هذا الطلب تفوق الحد الأقصى المسموح به لأقساط تابي. يُرجى اختيار الدفع بالبطاقة البنكية أو أبل باي لإتمام طلبك."
+          : "This order exceeds Tabby's installment limit. Please select Card / Apple Pay (Stripe) to complete your order.";
       }
       else if (rawReason === "order_amount_too_low") {
         rejectionMessage = isAr
@@ -512,8 +501,8 @@ const preScoring = async (req, res) => {
       }
       else if (rawReason === "not_available") {
         rejectionMessage = isAr
-          ? "نأسف، تابي غير قادرة على الموافقة على هذه العملية. الرجاء استخدام طريقة دفع أخرى."
-          : "Sorry, Tabby is unable to approve this purchase. Please use an alternative payment method for your order.";
+          ? "نأسف، تابي غير قادرة على الموافقة على خطة الأقساط لهذا الطلب. يُرجى استخدام البطاقة البنكية أو أبل باي للمتابعة."
+          : "Tabby is unable to approve installments for this order. Please use Credit/Debit Card or Apple Pay to proceed.";
       }
       else {
         rejectionMessage = isAr
@@ -625,6 +614,10 @@ const createTabbyOrder = async (req, res) => {
       order = await Order.findById(existingOrderId);
       if (!order) return res.status(404).json({ success: false, message: "Existing order not found" });
 
+      // Verify order ownership, status, and subtotal integrity
+      verifyExistingOrder(order, req.user, buyerEmail);
+
+      // Use items and subtotal from verified existing order (locking accepted negotiated price)
       populatedItems = order.items;
       subtotal = order.subtotal;
 
@@ -635,11 +628,11 @@ const createTabbyOrder = async (req, res) => {
       referenceId = order.orderId || `tabby_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
 
       order.shippingAddress = {
-        firstName: shippingAddress?.firstName || order.shippingAddress?.firstName,
-        lastName: shippingAddress?.lastName || order.shippingAddress?.lastName,
+        firstName: shippingAddress?.firstName || order.shippingAddress?.firstName || "Customer",
+        lastName: shippingAddress?.lastName || order.shippingAddress?.lastName || "User",
         email: buyerEmail,
         phone: buyerPhone,
-        city: shippingAddress?.city || order.shippingAddress?.city,
+        city: shippingAddress?.city || order.shippingAddress?.city || "Dubai",
         street: shippingAddress?.address1 || shippingAddress?.street || order.shippingAddress?.street || "N/A",
         country: normalizeCountry(shippingAddress?.country || order.shippingAddress?.country),
         postalCode: shippingAddress?.postalCode || order.shippingAddress?.postalCode || ""
@@ -651,59 +644,22 @@ const createTabbyOrder = async (req, res) => {
       order.paymentMethod = "tabby";
       await order.save();
     } else {
-      // Populate items for new order
-      if (!dummy && Array.isArray(items) && items.length > 0) {
-        populatedItems = await Promise.all(items.map(async (it) => {
-          const productId = it.productId || it.reference_id || it.id;
-          const product = await Product.findById(productId).select("name images salePrice regularPrice sku referenceNumber category").lean();
-          if (!product) {
-            return {
-              productId: productId && mongoose.Types.ObjectId.isValid(productId) ? productId : null,
-              name: it.name || it.title || "Product",
-              image: it.image || "",
-              price: Number(it.price || it.unit_price || 0),
-              quantity: Number(it.quantity || 1),
-              sku: it.sku || it.reference_id || "N/A",
-              category: "Accessories" // Fallback
-            };
-          }
-          return {
-            productId: product._id,
-            name: product.name,
-            image: product.images?.[0]?.url || product.images?.[0] || "",
-            price: it.price || it.unit_price || product.salePrice || product.regularPrice || 0,
-            quantity: it.quantity || 1,
-            sku: product.sku || product.referenceNumber || product._id.toString(),
-            category: product.category || "Watch"
-          };
-        }));
-      } else {
-        populatedItems = [{
-          productId: null,
-          name: "Dummy Watch",
-          image: "https://www.montres.ae/logo.png",
-          price: 100,
-          quantity: 1,
-          sku: "DUMMY-001",
-          category: "Watch"
-        }];
-      }
+      // Validate items and enforce trusted server-side database pricing
+      const pricing = await validateAndPriceItems(items);
+      populatedItems = pricing.populatedItems;
+      subtotal = pricing.subtotal;
+      const originalPriceTotal = pricing.originalPriceTotal;
 
-      subtotal = (populatedItems.reduce((acc, item) => acc + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0)) || 0;
       const calc = shippingCalculator.calculateShippingFee({ country: shippingAddress?.country || "AE", subtotal });
       shippingFee = calc.shippingFee;
       region = calc.region;
-      total = parseFloat((subtotal + shippingFee).toFixed(decimals)) || 0;
+      total = parseFloat((subtotal + shippingFee).toFixed(decimals));
 
-      if (!total || total <= 0) {
-        console.warn("  [5] ❌ Total amount is zero or invalid — aborting");
+      if (!total || total <= 0 || !Number.isFinite(total)) {
         return res.status(400).json({ success: false, message: "Invalid order amount. Please check your cart." });
       }
 
       referenceId = `tabby_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-
-      // Calculate originalPrice for new regular order
-      const originalPriceTotal = populatedItems.reduce((acc, item) => acc + (item.regularPrice || item.price) * item.quantity, 0);
 
       order = await Order.create({
         userId: req.user?.userId || null,
@@ -805,34 +761,20 @@ const createTabbyOrder = async (req, res) => {
       tabbyPayload.payment.buyer.phone = "+971500000001";
     }
 
-    // ✅ [4] Check correct secret key
-    const sk = process.env.TABBY_SECRET_KEY || "";
-    const skMode = sk.startsWith("sk_test_") ? "SANDBOX" : sk.startsWith("sk_live_") ? "LIVE" : "UNKNOWN";
-    console.log(`  [4] ✅ Secret key: ${sk ? sk.substring(0, 12) + "..." + sk.slice(-4) : "❌ MISSING"} [${skMode}]`);
+    // ✅ [4] Check secret key is configured
+    const sk = process.env.TABBY_SECRET_KEY;
     if (!sk) throw new Error("TABBY_SECRET_KEY is not defined in environment variables");
-    if (skMode === "UNKNOWN") console.warn("  [4] ⚠️ Key mode is UNKNOWN — ensure key starts with sk_test_ or sk_live_");
 
-    // ✅ [5] Check payload structure
-    console.log("  [5] ✅ Payload built — structure:");
+    // ✅ [5] Summary log (no customer PII)
+    console.log("  [5] ✅ Checkout summary:");
     console.log(`       referenceId   : ${referenceId}`);
     console.log(`       amount        : ${tabbyPayload.payment.amount} ${tabbyPayload.payment.currency}`);
-    console.log(`       buyer.email   : ${tabbyPayload.payment.buyer.email}`);
-    console.log(`       buyer.phone   : ${tabbyPayload.payment.buyer.phone}`);
-    console.log(`       buyer.name    : ${tabbyPayload.payment.buyer.name}`);
-    console.log(`       merchant_code : ${tabbyPayload.merchant_code}`);
-    console.log(`       success_url   : ${tabbyPayload.merchant_urls.success}`);
-    console.log(`       cancel_url    : ${tabbyPayload.merchant_urls.cancel}`);
-    console.log(`       failure_url   : ${tabbyPayload.merchant_urls.failure}`);
     console.log(`       items count   : ${tabbyPayload.payment.order.items.length}`);
     console.log(`       lang          : ${tabbyPayload.lang}`);
 
     // ✅ [3] Check correct endpoint
     const endpoint = `${TABBY_BASE}/checkout`;
     console.log(`  [3] ✅ Endpoint: POST ${endpoint}`);
-
-    // 📦 Full payload log
-    console.log("  [5] 📦 FULL TABBY CHECKOUT PAYLOAD:");
-    console.log(JSON.stringify(tabbyPayload, null, 2));
 
     // ✅ [2] Confirm request is now being sent
     console.log("  [2] 🚀 Sending request to Tabby API...");
@@ -888,16 +830,16 @@ const createTabbyOrder = async (req, res) => {
           rawReason === "order_too_high" || rawReason === "amount_too_high" ||
           rawReason === "not_enough_limit") {
           userMessage = isAr
-            ? "قيمة الطلب تفوق الحد الأقصى المسموح به حاليًا مع تابي. يُرجى تخفيض قيمة السلة أو استخدام وسيلة دفع أخرى."
-            : "This purchase is above your current spending limit with Tabby, try a smaller cart or use another payment method";
+            ? "قيمة هذا الطلب تفوق الحد الأقصى المسموح به لأقساط تابي. يُرجى اختيار الدفع بالبطاقة البنكية أو أبل باي لإتمام طلبك."
+            : "This order exceeds Tabby's installment limit. Please select Card / Apple Pay (Stripe) to complete your order.";
         } else if (rawReason === "order_amount_too_low" || rawReason === "order_too_low") {
           userMessage = isAr
             ? "قيمة الطلب أقل من الحد الأدنى المطلوب لاستخدام خدمة تابي. يُرجى زيادة قيمة الطلب أو استخدام وسيلة دفع أخرى."
             : "The purchase amount is below the minimum amount required to use Tabby, try adding more items or use another payment method";
         } else if (rawReason === "not_available" || rawReason === "not_eligible" || rawReason === "customer_not_eligible") {
           userMessage = isAr
-            ? "نأسف، تابي غير قادرة على الموافقة على هذه العملية. الرجاء استخدام طريقة دفع أخرى."
-            : "Sorry, Tabby is unable to approve this purchase. Please use an alternative payment method for your order.";
+            ? "نأسف، تابي غير قادرة على الموافقة على خطة الأقساط لهذا الطلب. يُرجى استخدام البطاقة البنكية أو أبل باي للمتابعة."
+            : "Tabby is unable to approve installments for this order. Please use Credit/Debit Card or Apple Pay to proceed.";
         }
       }
 
@@ -919,6 +861,13 @@ const createTabbyOrder = async (req, res) => {
     return res.status(201).json({ success: true, referenceId, checkoutUrl: paymentUrl });
 
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
+
     const errorDetails = error.response?.data || error.message;
     console.error("  [2/8] ❌ Tabby API call FAILED:");
     console.error(`         HTTP status : ${error.response?.status || "N/A (network error?)"}`);

@@ -205,6 +205,13 @@ const logout = async (req, res) => {
 };
 
 const RefreshToken = async (req, res) => {
+  const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    path: "/",
+  };
+
   try {
     const token = req.cookies.refreshToken || req.body.refreshToken;
     if (!token) {
@@ -221,6 +228,8 @@ const RefreshToken = async (req, res) => {
 
     const user = await userModel.findById(decoded.id);
     if (!user || user.refreshToken !== token) {
+      res.clearCookie("accessToken", cookieOptions);
+      res.clearCookie("refreshToken", cookieOptions);
       return res.status(403).json({ message: "Invalid or expired refresh token" });
     }
 
@@ -231,13 +240,6 @@ const RefreshToken = async (req, res) => {
     // Update refresh token in DB
     user.refreshToken = newRefreshToken;
     await user.save();
-
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/",
-    };
 
     res
       .cookie("accessToken", newAccessToken, {
@@ -255,10 +257,13 @@ const RefreshToken = async (req, res) => {
       refreshToken: newRefreshToken,
     });
   } catch (error) {
-    console.error("Refresh Token Error:", error);
     if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
+      console.warn("⚠️ Refresh Token rejected:", error.message);
+      res.clearCookie("accessToken", cookieOptions);
+      res.clearCookie("refreshToken", cookieOptions);
       return res.status(403).json({ message: "Invalid or expired refresh token" });
     }
+    console.error("Refresh Token Server Error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };

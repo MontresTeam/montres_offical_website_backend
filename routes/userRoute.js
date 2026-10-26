@@ -19,24 +19,29 @@ const {
   getUserProfile,
 } = require("../controllers/userProfileController");
 const { protect } = require("../middlewares/authMiddleware");
+const {
+  loginLimiter,
+  registerLimiter,
+  passwordResetLimiter,
+} = require("../middlewares/rateLimiter");
 
 const router = express.Router();
 
 // ✅ Correct routes
-router.post("/register", Registration);
+router.post("/register", registerLimiter, Registration);
 
 router.post("/refresh-token", RefreshToken);
 
 // router.post("/logout",logout)
 
-router.post("/login", Login);
+router.post("/login", loginLimiter, Login);
 
-router.post("/google-signup",googleSignup)
-router.post("/facebook-signup",facebookSignup)
+router.post("/google-signup", googleSignup);
+router.post("/facebook-signup", facebookSignup);
 // 🔑 Forgot Password (send reset link to email)
-router.post("/forgot-password", forgotPassword);
+router.post("/forgot-password", passwordResetLimiter, forgotPassword);
 // 🔑 Reset Password (update with new password)
-router.post("/reset-password/:id/:token", ResetPassword);
+router.post("/reset-password/:id/:token", passwordResetLimiter, ResetPassword);
 
 router.get("/convert-price", convertprice);
 

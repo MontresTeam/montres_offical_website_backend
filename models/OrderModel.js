@@ -147,7 +147,25 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+const crypto = require("crypto");
+
+orderSchema.add({
+  guestToken: {
+    type: String,
+    sparse: true,
+    index: true
+  }
+});
+
 orderSchema.pre("save", async function () {
+  if (!this.userId && !this.guestToken) {
+    try {
+      this.guestToken = crypto.randomBytes(24).toString("hex");
+    } catch (err) {
+      console.error("Error generating guestToken in Montres pre-save:", err);
+    }
+  }
+
   if (!this.orderNumber) {
     try {
       const prefix = "DM";
@@ -182,4 +200,4 @@ orderSchema.pre("save", async function () {
   }
 });
 
-module.exports = mongoose.model("Order", orderSchema);
+module.exports = mongoose.models.Order || mongoose.model("Order", orderSchema);

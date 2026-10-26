@@ -3,10 +3,10 @@ const jwt = require("jsonwebtoken");
 // Optional auth: populates req.user if a valid token exists, but never blocks the request.
 // Use this for routes that work for both guests and logged-in users (e.g. Tabby checkout).
 exports.optionalProtect = (req, res, next) => {
-  let userToken = req.cookies.accessToken;
-  let adminToken = req.cookies.adminToken;
+  let userToken = req.cookies?.accessToken;
+  let adminToken = req.cookies?.adminToken;
 
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers?.authorization;
   if (authHeader && authHeader.startsWith("Bearer")) {
     const headerToken = authHeader.split(" ")[1];
     if (!userToken) userToken = headerToken;
@@ -16,7 +16,7 @@ exports.optionalProtect = (req, res, next) => {
   if (userToken) {
     try {
       const decoded = jwt.verify(userToken, process.env.USER_ACCESS_TOKEN_SECRET);
-      req.user = { userId: decoded.id, isAdmin: decoded.isAdmin };
+      req.user = { userId: decoded.id || decoded.userId || decoded._id, isAdmin: !!decoded.isAdmin };
     } catch (err) {
       req.user = null;
     }
@@ -44,10 +44,10 @@ exports.optionalProtect = (req, res, next) => {
 
 // Existing user protection
 exports.protect = (req, res, next) => {
-  let token = req.cookies.accessToken;
+  let token = req.cookies?.accessToken;
 
   if (!token) {
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers?.authorization;
     if (authHeader && authHeader.startsWith("Bearer")) {
       token = authHeader.split(" ")[1];
     }
@@ -57,7 +57,7 @@ exports.protect = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.USER_ACCESS_TOKEN_SECRET);
-    req.user = { userId: decoded.id };
+    req.user = { userId: decoded.id || decoded.userId || decoded._id, isAdmin: !!decoded.isAdmin };
     next();
   } catch (err) {
     return res.status(401).json({ message: "Invalid or expired token" });
@@ -66,10 +66,10 @@ exports.protect = (req, res, next) => {
 
 // New Admin protection
 exports.adminProtect = (req, res, next) => {
-  let token = req.cookies.adminToken;
+  let token = req.cookies?.adminToken;
 
   if (!token) {
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers?.authorization;
     if (authHeader && authHeader.startsWith("Bearer")) {
       token = authHeader.split(" ")[1];
     }
