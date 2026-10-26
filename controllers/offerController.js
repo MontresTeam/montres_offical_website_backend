@@ -30,6 +30,7 @@ const createOffer = async (req, res) => {
             productName,
             customerName,
             customerEmail,
+            customerPhone,
             originalPrice,
             offerPrice,
             message,
@@ -44,12 +45,14 @@ const createOffer = async (req, res) => {
         let dbUser = null;
         let finalCustomerName = customerName;
         let finalCustomerEmail = customerEmail;
+        let finalCustomerPhone = customerPhone || "";
 
         if (userId) {
             dbUser = await User.findById(userId);
             if (dbUser) {
                 finalCustomerName = dbUser.name;
                 finalCustomerEmail = dbUser.email;
+                if (!finalCustomerPhone && dbUser.phone) finalCustomerPhone = dbUser.phone;
             }
         }
 
@@ -97,6 +100,7 @@ const createOffer = async (req, res) => {
             productName: productName || product.name,
             customerName: finalCustomerName || "Guest",
             customerEmail: finalCustomerEmail,
+            customerPhone: finalCustomerPhone,
             originalPrice,
             offerPrice,
             offerPercentage,
@@ -107,8 +111,99 @@ const createOffer = async (req, res) => {
             status: "pending"
         };
 
+        // 3.5 Check Auto-Approval Threshold
+        const autoApproveThreshold = product.auto_approve_percentage || 95;
+        const isAutoApproved = !!(product.auto_approve_enabled && offerPercentage >= autoApproveThreshold);
+
+        if (isAutoApproved) {
+            offerData.status = "accepted";
+            offerData.autoApproved = true;
+        }
+
         const newOffer = new Offer(offerData);
         let savedOffer = await newOffer.save();
+
+        if (isAutoApproved) {
+            let savedOrder = null;
+            try {
+                const newOrder = new Order({
+                    userId: userId || null,
+                    items: [{
+                        productId: product._id,
+                        name: offerData.productName,
+                        price: offerPrice,
+                        quantity: 1,
+                        image: product.images?.find(i => i.type === 'main')?.url || product.images?.[0]?.url || ""
+                    }],
+                    subtotal: offerPrice,
+                    originalPrice: originalPrice,
+                    total: offerPrice,
+                    paymentMethod: "stripe",
+                    paymentStatus: "pending",
+                    currency: "AED",
+                    shippingAddress: {
+                        firstName: finalCustomerName.split(' ')[0] || "Customer",
+                        lastName: finalCustomerName.split(' ').slice(1).join(' ') || "",
+                        email: finalCustomerEmail,
+                        phone: finalCustomerPhone || ""
+                    }
+                });
+                savedOrder = await newOrder.save();
+                savedOffer.order = savedOrder._id;
+                await savedOffer.save();
+            } catch (err) {
+                console.error("Auto-order creation failed on auto-approval:", err);
+            }
+
+            // Notification to Admin: Offer Auto-Approved
+            await createAdminNotification(req.app, {
+                message: `Offer Auto-Approved: Customer bid of ${offerPrice} AED on ${productName || product.name} met auto-approval threshold (${autoApproveThreshold}%).`,
+                type: "offer_auto_approved",
+                offerId: savedOffer._id,
+                actionLink: `/offers/${savedOffer._id}`
+            });
+
+            // Notification to Customer
+            if (userId) {
+                await createCustomerNotification(req.app, {
+                    userId,
+                    message: `Offer Accepted! Your offer of ${offerPrice} AED has been accepted automatically. Proceed to checkout.`,
+                    type: "offer_accepted",
+                    offerId: savedOffer._id,
+                });
+            }
+
+            // Emails
+            try {
+                await sendAdminOfferNotification({
+                    productName: productName || product.name,
+                    customerName: finalCustomerName || "Guest",
+                    customerEmail: finalCustomerEmail,
+                    customerPhone: finalCustomerPhone,
+                    offerPrice,
+                    originalPrice,
+                    status: "AUTO_ACCEPTED",
+                    orderId: savedOrder?._id
+                });
+            } catch (err) {
+                console.error("Admin Email Notify Failed:", err);
+            }
+
+            try {
+                await sendOfferStatusUpdateEmail(savedOffer, "accepted", savedOrder?._id);
+            } catch (err) {
+                console.error("Customer Auto-Acceptance Email Failed:", err);
+            }
+
+            return res.status(201).json({
+                success: true,
+                autoApproved: true,
+                message: `Congratulations! Your offer of AED ${Number(offerPrice).toLocaleString()} was approved instantly.`,
+                data: savedOffer,
+                orderId: savedOrder?._id,
+                redirectUrl: `/checkout?orderId=${savedOrder?._id}&offerToken=${token}`
+            });
+        }
 
         // 4. Auto Counter Logic (Storage only - keep as pending for customer)
         // We calculate counterPrice for admin suggestion, but keep status as pending
@@ -294,7 +389,7 @@ const rejectOffer = async (req, res) => {
 // @route   POST /api/offers/counter/:id
 const counterOffer = async (req, res) => {
     try {
-        const { id, counterPrice, expirationHours } = req.body;
+        const { id, counterPrice, expirationHours, notes } = req.body;
 
         if (!counterPrice) {
             return res.status(400).json({ message: "Counter price is required" });
@@ -311,6 +406,7 @@ const counterOffer = async (req, res) => {
 
         offer.status = "countered";
         offer.counterPrice = counterPrice;
+        if (notes) offer.counterNotes = notes;
         offer.expiresAt = expiresAt;
         await offer.save();
 

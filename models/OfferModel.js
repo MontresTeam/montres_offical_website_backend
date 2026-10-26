@@ -24,6 +24,10 @@ const offerSchema = new mongoose.Schema(
             type: String,
             required: true,
         },
+        customerPhone: {
+            type: String,
+            trim: true,
+        },
         originalPrice: {
             type: Number,
             required: true,
@@ -54,6 +58,13 @@ const offerSchema = new mongoose.Schema(
         },
         message: {
             type: String,
+        },
+        counterNotes: {
+            type: String,
+        },
+        autoApproved: {
+            type: Boolean,
+            default: false,
         },
         order: {
             type: mongoose.Schema.Types.ObjectId,
