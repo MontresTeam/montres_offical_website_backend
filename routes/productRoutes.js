@@ -55,7 +55,7 @@ router.get("/productAll", getAllProductwithSearch);
 router.get("/getAllBrands", getAllBrands)                      // Fetch all products
 router.post("/products", adminProtect, ImageUpload, addProduct);          // Add a new product (Admin Only)
 router.post("/createBooking", ImageUpload, addServiceForm); // Create service form
-router.get("/getBooking", getBookingService)
+router.get("/getBooking", adminProtect, getBookingService); // View service forms (Admin Only)
 router.put("/updateBookingStatus/:id", adminProtect, updateBookingStatus);
 router.put("/updateBooking/:id", adminProtect, updateBooking);
 router.delete("/deleteBooking/:id", adminProtect, deleteBooking);

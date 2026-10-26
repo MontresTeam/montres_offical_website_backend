@@ -1,6 +1,7 @@
 const express = require("express");
 const {
     createOffer,
+    reopenOffer,
     getOffers,
     acceptOffer,
     rejectOffer,
@@ -18,7 +19,7 @@ const router = express.Router();
 // Public routes
 router.post("/create", protect, createOffer); // POST /api/offers/create requires user to be logged in
 router.get("/verify/:token", verifyOfferToken); // GET /api/offers/verify/:token
-router.get("/:id", getOfferById); // GET /api/offers/:id
+router.get("/:id", optionalProtect, getOfferById); // GET /api/offers/:id
 
 // Protected Customer routes
 router.post("/counter-response", optionalProtect, respondToCounterOffer); // POST /api/offers/counter-response
@@ -32,6 +33,7 @@ adminRouter.use(adminProtect);
 adminRouter.get("/", getOffers); // GET /api/admin/offers
 adminRouter.post("/accept", acceptOffer); // POST /api/admin/offers/accept
 adminRouter.post("/reject", rejectOffer); // POST /api/admin/offers/reject
+adminRouter.post("/reopen", reopenOffer); // POST /api/admin/offers/reopen
 adminRouter.post("/counter", counterOffer); // POST /api/admin/offers/counter
 adminRouter.delete("/:id", deleteOffer); // DELETE /api/admin/offers/:id
 

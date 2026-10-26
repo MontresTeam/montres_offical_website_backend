@@ -1,21 +1,38 @@
 const fs = require("fs");
 const path = require("path");
 const csv = require("csv-parser");
-const xlsx = require("xlsx");
+const ExcelJS = require("exceljs");
 const InventoryStock = require("../models/InventoryStockModel");
 const MonthEndReport = require("../models/MonthEndReportModel");
+const { validateSpreadsheetFile, cleanupTempFiles } = require("../utils/uploadSecurityHelper");
+
+// Helper to safely extract cell values from ExcelJS
+function extractCellValue(cell) {
+  if (!cell || cell.value === null || cell.value === undefined) return "";
+  const val = cell.value;
+  if (typeof val === "object") {
+    if (val.result !== undefined && val.result !== null) return val.result;
+    if (Array.isArray(val.richText)) return val.richText.map((t) => t.text || "").join("");
+    if (val.text !== undefined && val.text !== null) return val.text;
+    if (val instanceof Date) return val.toISOString();
+    return "";
+  }
+  return val;
+}
 
 // Helper to safely parse numbers
 function parseNumber(value) {
-  if (!value) return 0;
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "number") return isNaN(value) ? 0 : value;
   const num = Number(value.toString().replace(/,/g, "").trim());
   return isNaN(num) ? 0 : num;
 }
 
 // Helper for quantity like: "10pcs (3 sold)"
 function parseQuantity(value) {
-  if (!value) return 0;
-  const match = value.match(/\d+/);
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "number") return isNaN(value) ? 0 : value;
+  const match = value.toString().match(/\d+/);
   return match ? Number(match[0]) : 0;
 }
 
@@ -418,81 +435,169 @@ const deleteInventory = async (req, res) => {
 };
 
 // ---------------------- IMPORT CSV / EXCEL ----------------------
+const MAX_IMPORT_ROWS = 10000;
+
 const importInventory = async (req, res) => {
   if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-  const ext = path.extname(req.file.originalname);
+  // 1. Validate file extension, declared MIME, and file magic bytes
+  const validation = validateSpreadsheetFile(req.file);
+  if (!validation.valid) {
+    cleanupTempFiles(req.file);
+    return res.status(400).json({ message: validation.error });
+  }
+
+  const ext = path.extname(req.file.originalname).toLowerCase();
   const results = [];
 
   try {
     // ---------------- CSV Import ----------------
     if (ext === ".csv") {
-      fs.createReadStream(req.file.path)
-        .pipe(csv())
-        .on("data", (row) => {
-          if (!row["BRAND/PRODUCT NAME"]) return;
+      let rowCount = 0;
 
-          results.push({
-            brand: row["BRAND/PRODUCT NAME"]?.trim() || "",
-            internalCode: row["Code"]?.trim() || "",
-            quantity: parseQuantity(row["QUANTITY"]),
-            status:
-              row["AVAILABLE/SOLD/AUCTION"]?.trim().toUpperCase() ||
-              "AVAILABLE",
-            cost: parseNumber(row["Cost"]),
-            sellingPrice: parseNumber(row["Selling Price"]),
-            soldPrice: parseNumber(row["SOLD PRICE"]),
-            paymentMethod: row["PAYMENT METHOD"]?.trim() || "",
-            receivingAmount: parseNumber(row["reciving amount"]),
-          });
-        })
-        .on("end", async () => {
-          try {
-            await InventoryStock.insertMany(results);
-            fs.unlinkSync(req.file.path);
-            res.status(200).json({
-              message: "CSV data imported",
-              count: results.length,
+      await new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(req.file.path)
+          .pipe(csv())
+          .on("data", (row) => {
+            rowCount++;
+            if (rowCount > MAX_IMPORT_ROWS) {
+              stream.destroy(new Error(`CSV exceeds maximum limit of ${MAX_IMPORT_ROWS} rows`));
+              return;
+            }
+
+            if (!row["BRAND/PRODUCT NAME"]) return;
+
+            results.push({
+              brand: row["BRAND/PRODUCT NAME"]?.trim() || "",
+              internalCode: row["Code"]?.trim() || "",
+              quantity: parseQuantity(row["QUANTITY"]),
+              status:
+                row["AVAILABLE/SOLD/AUCTION"]?.trim().toUpperCase() ||
+                "AVAILABLE",
+              cost: parseNumber(row["Cost"]),
+              sellingPrice: parseNumber(row["Selling Price"]),
+              soldPrice: parseNumber(row["SOLD PRICE"]),
+              paymentMethod: row["PAYMENT METHOD"]?.trim() || "",
+              receivingAmount: parseNumber(row["reciving amount"]),
             });
-          } catch (err) {
-            res.status(500).json({ error: err.message });
-          }
-        });
-    }
-
-    // ---------------- Excel Import ----------------
-    else {
-      const workbook = xlsx.readFile(req.file.path);
-      const sheetName = workbook.SheetNames[0];
-      const sheet = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
-
-      sheet.forEach((row) => {
-        if (!row["BRAND/PRODUCT NAME"]) return;
-
-        results.push({
-          brand: row["BRAND/PRODUCT NAME"]?.trim() || "",
-          internalCode: row["Code"]?.trim() || "",
-          quantity: parseQuantity(row["QUANTITY"]),
-          status:
-            row["AVAILABLE/SOLD/AUCTION"]?.trim().toUpperCase() || "AVAILABLE",
-          cost: parseNumber(row["Cost"]),
-          sellingPrice: parseNumber(row["Selling Price"]),
-          soldPrice: parseNumber(row["SOLD PRICE"]),
-          paymentMethod: row["PAYMENT METHOD"]?.trim() || "",
-          receivingAmount: parseNumber(row["reciving amount"]),
-        });
+          })
+          .on("error", (err) => {
+            reject(err);
+          })
+          .on("end", () => {
+            resolve();
+          });
       });
 
-      await InventoryStock.insertMany(results);
-      fs.unlinkSync(req.file.path);
+      if (results.length > 0) {
+        await InventoryStock.insertMany(results);
+      }
 
-      res.status(200).json({
-        message: "Excel data imported",
+      return res.status(200).json({
+        message: "CSV data imported",
         count: results.length,
       });
     }
+
+    // ---------------- Excel Import (.xlsx) ----------------
+    else if (ext === ".xlsx") {
+      const workbook = new ExcelJS.Workbook();
+      try {
+        await workbook.xlsx.readFile(req.file.path);
+      } catch (parseErr) {
+        return res.status(400).json({ message: "Malformed or corrupted Excel file." });
+      }
+
+      if (!workbook.worksheets || workbook.worksheets.length === 0) {
+        return res.status(400).json({ message: "Excel workbook contains no sheets." });
+      }
+
+      const worksheet = workbook.worksheets[0];
+      if (!worksheet || worksheet.rowCount === 0) {
+        return res.status(400).json({ message: "Excel workbook contains no data." });
+      }
+
+      // Read header row (Row 1)
+      const headerRow = worksheet.getRow(1);
+      const headerMap = {};
+      let hasBrandColumn = false;
+
+      headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        const rawHeader = extractCellValue(cell).toString().trim();
+        if (rawHeader) {
+          headerMap[colNumber] = rawHeader;
+          if (rawHeader === "BRAND/PRODUCT NAME") {
+            hasBrandColumn = true;
+          }
+        }
+      });
+
+      if (!hasBrandColumn) {
+        return res.status(400).json({ message: "Excel file is missing required column: 'BRAND/PRODUCT NAME'" });
+      }
+
+      let rowCount = 0;
+      let limitExceeded = false;
+
+      worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        if (rowNumber === 1) return; // skip header
+        rowCount++;
+        if (rowCount > MAX_IMPORT_ROWS) {
+          limitExceeded = true;
+          return;
+        }
+
+        const rowData = {};
+        row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+          const header = headerMap[colNumber];
+          if (header) {
+            rowData[header] = extractCellValue(cell);
+          }
+        });
+
+        const brand = rowData["BRAND/PRODUCT NAME"] ? rowData["BRAND/PRODUCT NAME"].toString().trim() : "";
+        if (!brand) return; // skip rows without required brand name
+
+        results.push({
+          brand,
+          internalCode: rowData["Code"] ? rowData["Code"].toString().trim() : "",
+          quantity: parseQuantity(rowData["QUANTITY"]),
+          status:
+            rowData["AVAILABLE/SOLD/AUCTION"]?.toString().trim().toUpperCase() ||
+            "AVAILABLE",
+          cost: parseNumber(rowData["Cost"]),
+          sellingPrice: parseNumber(rowData["Selling Price"]),
+          soldPrice: parseNumber(rowData["SOLD PRICE"]),
+          paymentMethod: rowData["PAYMENT METHOD"] ? rowData["PAYMENT METHOD"].toString().trim() : "",
+          receivingAmount: parseNumber(rowData["reciving amount"]),
+        });
+      });
+
+      if (limitExceeded) {
+        return res.status(400).json({ message: `Excel spreadsheet exceeds maximum limit of ${MAX_IMPORT_ROWS} rows` });
+      }
+
+      if (results.length > 0) {
+        await InventoryStock.insertMany(results);
+      }
+
+      return res.status(200).json({
+        message: "Excel data imported",
+        count: results.length,
+      });
+    } else if (ext === ".xls") {
+      return res.status(400).json({
+        message: "Unsupported format '.xls'. Please save your spreadsheet as modern Excel (.xlsx) or CSV (.csv) before uploading.",
+      });
+    } else {
+      return res.status(400).json({ message: "Unsupported spreadsheet format. Allowed: .csv, .xlsx" });
+    }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Import inventory error:", err.message);
+    const isClientError = err.message.includes("maximum limit") || err.message.includes("CSV") || err.message.includes("Excel");
+    return res.status(isClientError ? 400 : 500).json({ message: err.message, error: err.message });
+  } finally {
+    cleanupTempFiles(req.file);
   }
 };
 
@@ -501,37 +606,59 @@ const exportInventory = async (req, res) => {
   try {
     const items = await InventoryStock.find().sort({ createdAt: -1 });
 
-    const worksheet = xlsx.utils.json_to_sheet(
-      items.map((item) => ({
-        productName: item.productName,
-        brand: item.brand,
-        internalCode: item.internalCode,
-        quantity: item.quantity,
-        status: item.status,
-        cost: item.cost,
-        sellingPrice: item.sellingPrice,
-        soldPrice: item.soldPrice,
-        paymentMethod: item.paymentMethod,
-        receivingAmount: item.receivingAmount,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-      }))
-    );
-
-    const workbook = xlsx.utils.book_new();
-    xlsx.utils.book_append_sheet(workbook, worksheet, "InventoryStock");
-
     const exportDir = path.join(__dirname, "../exports");
     if (!fs.existsSync(exportDir)) {
       fs.mkdirSync(exportDir, { recursive: true });
     }
 
     const exportFile = path.join(exportDir, "inventory_export.xlsx");
-    xlsx.writeFile(workbook, exportFile);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Montres Luxury";
+    workbook.created = new Date();
+    const worksheet = workbook.addWorksheet("InventoryStock");
+
+    worksheet.columns = [
+      { header: "productName", key: "productName" },
+      { header: "brand", key: "brand" },
+      { header: "internalCode", key: "internalCode" },
+      { header: "quantity", key: "quantity" },
+      { header: "status", key: "status" },
+      { header: "cost", key: "cost" },
+      { header: "sellingPrice", key: "sellingPrice" },
+      { header: "soldPrice", key: "soldPrice" },
+      { header: "paymentMethod", key: "paymentMethod" },
+      { header: "receivingAmount", key: "receivingAmount" },
+      { header: "createdAt", key: "createdAt" },
+      { header: "updatedAt", key: "updatedAt" },
+    ];
+
+    items.forEach((item) => {
+      worksheet.addRow({
+        productName: item.productName || "",
+        brand: item.brand || "",
+        internalCode: item.internalCode || "",
+        quantity: item.quantity !== undefined ? item.quantity : 1,
+        status: item.status || "AVAILABLE",
+        cost: item.cost || 0,
+        sellingPrice: item.sellingPrice || 0,
+        soldPrice: item.soldPrice || 0,
+        paymentMethod: item.paymentMethod || "",
+        receivingAmount: item.receivingAmount || 0,
+        createdAt: item.createdAt ? item.createdAt.toISOString() : "",
+        updatedAt: item.updatedAt ? item.updatedAt.toISOString() : "",
+      });
+    });
+
+    await workbook.xlsx.writeFile(exportFile);
 
     res.download(exportFile, "inventory_export.xlsx", (err) => {
-      if (err) console.error(err);
-      fs.unlinkSync(exportFile);
+      if (err) console.error("Export download error:", err.message);
+      if (fs.existsSync(exportFile)) {
+        try {
+          fs.unlinkSync(exportFile);
+        } catch (e) {}
+      }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

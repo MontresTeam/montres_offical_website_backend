@@ -44,6 +44,15 @@ const LEATHER_SUB_CATEGORIES = [
   "Long Bi-Fold Wallet",
   "Reversible Belt",
   "Business Bag",
+  "Birkin / Kelly Style Handbag",
+  "Crossbody / Messenger Bag",
+  "Clutch / Evening Bag",
+  "Duffle / Travel Bag",
+  "Briefcase / Work Bag",
+  "Belt Bag / Fanny Pack",
+  "Bucket Bag",
+  "Hobo Bag",
+  "Vanity Case"
 ];
 
 // Accessory specific enums
@@ -159,6 +168,29 @@ const LEATHER_MATERIALS = [
   "Vegan Leather (PU)",
   "Leather",
   "Fabric",
+  "Togo Leather",
+  "Epsom Leather",
+  "Clemence Leather",
+  "Box Calf Leather",
+  "Swift Leather",
+  "Caviar Leather",
+  "Lambskin Leather",
+  "Monogram Canvas",
+  "Damier Ebene Canvas",
+  "Damier Azur Canvas",
+  "Grained Calfskin",
+  "Smooth Calfskin",
+  "Exotic - Crocodile / Alligator",
+  "Exotic - Ostrich",
+  "Exotic - Lizard",
+  "Chevre (Goatskin) Leather",
+  "Calfskin Leather",
+  "Microfiber / Alcantara",
+  "Smooth Suede",
+  "Textile Fabric Canvas",
+  "Signature Monogram Canvas",
+  "Nylon",
+  "Silk / Jacquard"
 ];
 
 const INTERIOR_MATERIALS = [
@@ -176,6 +208,12 @@ const INTERIOR_MATERIALS = [
   "Cotton",
   "Wool Blend",
   "Alcantara",
+  "Chevre (Goatskin) Leather",
+  "Calfskin Leather",
+  "Microfiber / Alcantara",
+  "Smooth Suede",
+  "Textile Fabric Canvas",
+  "Signature Monogram Canvas"
 ];
 
 const HARDWARE_COLORS = [
@@ -193,6 +231,14 @@ const HARDWARE_COLORS = [
   "Palladium",
   "Antique Gold",
   "Antique Silver",
+  "Gold Hardware (GHW)",
+  "Palladium / Silver (PHW)",
+  "Rose Gold Hardware (RGHW)",
+  "Permabrass / Champagne Gold",
+  "Ruthenium / Dark Gunmetal",
+  "Brushed Gold",
+  "Brushed Silver",
+  "Black Matte (So Black)"
 ];
 
 const LEATHER_GOODS_SCOPE_OF_DELIVERY = [
@@ -203,6 +249,11 @@ const LEATHER_GOODS_SCOPE_OF_DELIVERY = [
   "With papers",
   "Original box only",
   "Dust bag",
+  "Full Boutique Set (Bag + Box + Dustbag + Receipt + Clochette/Lock)",
+  "Bag with Original Dustbag + Box",
+  "Bag with Original Dustbag",
+  "Bag with Montres Safe Dustbag",
+  "Item Only"
 ];
 
 const attributeSchema = new mongoose.Schema(
@@ -307,11 +358,9 @@ const productSchema = new mongoose.Schema(
     // ────────────── CONDITION INFORMATION ──────────────
     condition: {
       type: String,
-      enum: CONDITIONS,
     },
     itemCondition: {
       type: String,
-      enum: ITEM_CONDITIONS,
     },
     conditionNotes: { type: String },
 
@@ -437,7 +486,6 @@ const productSchema = new mongoose.Schema(
     includedAccessories: [
       {
         type: String,
-        enum: INCLUDE_ACCESSORIES,
         index: true,
       },
     ],
@@ -517,7 +565,6 @@ const productSchema = new mongoose.Schema(
     },
     leatherSubCategory: {
       type: String,
-      enum: LEATHER_SUB_CATEGORIES,
       index: true,
     },
     modelCode: { type: String },
@@ -526,15 +573,12 @@ const productSchema = new mongoose.Schema(
     referenceNumber: { type: String },
     leatherMaterial: {
       type: String,
-      enum: LEATHER_MATERIALS,
     },
     interiorMaterial: {
       type: String,
-      enum: INTERIOR_MATERIALS,
     },
     hardwareColor: {
       type: String,
-      enum: HARDWARE_COLORS,
     },
     leatherSize: sizeSchema,
     strapLength: {
@@ -543,26 +587,12 @@ const productSchema = new mongoose.Schema(
     },
     leatherAccessories: {
       type: [String],
-      enum: [
-        "Original box",
-        "Dust bag",
-        "Certificate of authenticity",
-        "Care instructions",
-        "Warranty card",
-        "Gift box",
-        "User manual",
-        "Extra links",
-        "Cleaning cloth",
-        "Adjustment tools",
-        "Only bag",
-      ],
       index: true,
     },
 
     scopeOfDelivery: [
       {
         type: String,
-        enum: LEATHER_GOODS_SCOPE_OF_DELIVERY,
         index: true,
       },
     ],

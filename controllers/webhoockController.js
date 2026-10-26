@@ -10,6 +10,11 @@ const crypto = require("crypto");
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const TAMARA_WEBHOOK_SECRET = process.env.TAMARA_NOTIFICATION_KEY || process.env.TAMARA_WEBHOOK_SECRET;
 
+if (process.env.STRIPE_WEBHOOK_SECRET) {
+    console.log("Stripe webhook secret: configured");
+} else {
+    console.warn("Stripe webhook secret: missing");
+}
 
 const sendOrderConfirmation = require("../utils/sendOrderConfirmation");
 
@@ -32,9 +37,6 @@ const handleStripeWebhook = async (req, res) => {
             console.error("❌ CRITICAL: STRIPE_SECRET_KEY or STRIPE_WEBHOOK_SECRET is not defined in .env!");
             return res.status(500).send("Webhook secret or key not configured");
         }
-
-        console.log(`🔑 Loaded Secret Prefix: ${STRIPE_WEBHOOK_SECRET.substring(0, 10)}...`);
-        console.log(`🔑 Expected Secret Prefix: whsec_a4f...`);
 
 
         if (!sig) {

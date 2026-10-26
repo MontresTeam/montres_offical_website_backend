@@ -30,4 +30,18 @@ const uploadToS3 = (filePath, s3Key, mimeType) => {
   return s3.upload(params).promise().then((data) => data.Location);
 };
 
-module.exports = { s3, BUCKET, uploadToS3 };
+/**
+ * Delete a file from S3 bucket.
+ * @param {string} s3Key - S3 object key
+ * @returns {Promise<any>}
+ */
+const deleteFromS3 = (s3Key) => {
+  if (!s3Key) return Promise.resolve();
+  const params = {
+    Bucket: BUCKET,
+    Key: s3Key,
+  };
+  return s3.deleteObject(params).promise();
+};
+
+module.exports = { s3, BUCKET, uploadToS3, deleteFromS3 };

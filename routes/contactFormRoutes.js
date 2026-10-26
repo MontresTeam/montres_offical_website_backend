@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const router = express.Router();
 const {
   submitContactForm,
@@ -10,9 +10,11 @@ const {
 const imageUpload = require("../config/multerConfig");
 
 const { adminProtect } = require("../middlewares/authMiddleware");
+const { contactLimiter } = require("../middlewares/rateLimiter");
 
 // Submit contact form (with S3 upload) - Public
-router.post("/submit", imageUpload, submitContactForm);
+// Rate limiting applied before multer upload parsing
+router.post("/submit", contactLimiter, imageUpload, submitContactForm);
 
 // Admin protected routes
 router.get("/", adminProtect, getAllContacts);

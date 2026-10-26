@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const Message = require('../models/Message');
 const ChatStatus = require('../models/ChatStatus');
+const { adminProtect, optionalProtect } = require('../middlewares/authMiddleware');
 
 // Get chat status
 router.get('/status', async (req, res) => {
@@ -16,8 +18,8 @@ router.get('/status', async (req, res) => {
     }
 });
 
-// Update chat status
-router.put('/status', async (req, res) => {
+// Update chat status (Admin only)
+router.put('/status', adminProtect, async (req, res) => {
     try {
         const { isOnline } = req.body;
         const status = await ChatStatus.findOneAndUpdate(
@@ -98,8 +100,8 @@ router.post('/offline-message', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const FaqBot = require('../models/FaqBot');
 
-// Get all FAQs (Admin)
-router.get('/faq/all', async (req, res) => {
+// Get all FAQs (Admin only)
+router.get('/faq/all', adminProtect, async (req, res) => {
     try {
         const faqs = await FaqBot.find().sort({ trigger: 1 });
         res.json(faqs);
@@ -108,7 +110,7 @@ router.get('/faq/all', async (req, res) => {
     }
 });
 
-// Get FAQ response by trigger (Chatbot)  
+// Get FAQ response by trigger (Chatbot - Public)  
 // NOTE: Keep this above /:userId/:otherId or Express will match faq/trigger as userId/otherId
 router.get('/faq/:trigger', async (req, res) => {
     try {
@@ -122,8 +124,8 @@ router.get('/faq/:trigger', async (req, res) => {
     }
 });
 
-// Upsert FAQ (Admin)
-router.post('/faq', async (req, res) => {
+// Upsert FAQ (Admin only)
+router.post('/faq', adminProtect, async (req, res) => {
     try {
         const { trigger, response, options, category } = req.body;
         const faq = await FaqBot.findOneAndUpdate(
@@ -137,8 +139,8 @@ router.post('/faq', async (req, res) => {
     }
 });
 
-// Delete FAQ (Admin)
-router.delete('/faq/:id', async (req, res) => {
+// Delete FAQ (Admin only)
+router.delete('/faq/:id', adminProtect, async (req, res) => {
     try {
         await FaqBot.findByIdAndDelete(req.params.id);
         res.json({ message: 'FAQ deleted successfully' });
@@ -151,24 +153,9 @@ router.delete('/faq/:id', async (req, res) => {
 // CHAT HISTORY & CONVERSATION ROUTES  (generic wildcards come AFTER specifics)
 // ─────────────────────────────────────────────────────────────────────────────
 
-router.get('/:userId/:otherId', async (req, res) => {
-    try {
-        const { userId, otherId } = req.params;
-        const messages = await Message.find({
-            $or: [
-                { senderId: userId, receiverId: otherId },
-                { senderId: otherId, receiverId: userId }
-            ]
-        }).sort({ timestamp: 1 });
-
-        res.json(messages);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-});
-
-// Get all unique conversations for an admin with metadata
-router.get('/conversations', async (req, res) => {
+// Get all unique conversations for an admin with metadata (Admin only)
+// Placed before parameterized route
+router.get('/conversations', adminProtect, async (req, res) => {
     try {
         const adminId = 'admin_main'; // Standard admin ID
 
@@ -298,8 +285,47 @@ router.get('/conversations', async (req, res) => {
     }
 });
 
-// Mark messages as read
-router.put('/read/:userId', async (req, res) => {
+// Get conversation history between two participants
+router.get('/:userId/:otherId', optionalProtect, async (req, res) => {
+    try {
+        const { userId, otherId } = req.params;
+
+        const isAdmin = Boolean(req.admin && req.admin.role);
+        const isAuthUser = Boolean(req.user && req.user.userId);
+        const isParticipant = isAuthUser && (
+            req.user.userId.toString() === userId ||
+            req.user.userId.toString() === otherId
+        );
+
+        // Security check: Only allow access if:
+        // 1. Caller is an authenticated Admin, OR
+        // 2. Caller is the authenticated User participating in this conversation, OR
+        // 3. The request is for an anonymous guest conversation (neither party is a registered user ObjectId)
+        if (!isAdmin && !isParticipant) {
+            const hasRegisteredUserParticipant =
+                (mongoose.Types.ObjectId.isValid(userId) && !userId.startsWith('guest_') && !userId.startsWith('user_')) ||
+                (mongoose.Types.ObjectId.isValid(otherId) && !otherId.startsWith('guest_') && !otherId.startsWith('user_'));
+
+            if (hasRegisteredUserParticipant) {
+                return res.status(403).json({ message: "Access denied. Authentication required to view user conversation." });
+            }
+        }
+
+        const messages = await Message.find({
+            $or: [
+                { senderId: userId, receiverId: otherId },
+                { senderId: otherId, receiverId: userId }
+            ]
+        }).sort({ timestamp: 1 });
+
+        res.json(messages);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// Mark messages as read (Admin only)
+router.put('/read/:userId', adminProtect, async (req, res) => {
     try {
         const adminId = 'admin_main';
         const { userId } = req.params;

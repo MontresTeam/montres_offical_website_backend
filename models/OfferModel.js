@@ -65,4 +65,10 @@ const offerSchema = new mongoose.Schema(
     }
 );
 
-module.exports = mongoose.model("Offer", offerSchema);
+offerSchema.virtual("offeredPrice").get(function () {
+    return this.offerPrice;
+});
+offerSchema.set("toJSON", { virtuals: true });
+offerSchema.set("toObject", { virtuals: true });
+
+module.exports = mongoose.models.Offer || mongoose.model("Offer", offerSchema);

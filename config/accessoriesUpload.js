@@ -1,21 +1,51 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const multer = require("multer");
-const { uploadToS3 } = require("./s3Client");
+const { s3, BUCKET, uploadToS3 } = require("./s3Client");
+const {
+  validateImageFile,
+  sanitizeFilename,
+  generateSafeS3Key,
+  cleanupTempFiles,
+  rollbackS3Uploads,
+  ALLOWED_IMAGE_EXTENSIONS,
+  ALLOWED_IMAGE_MIME_TYPES,
+} = require("../utils/uploadSecurityHelper");
 
 // Ensure upload folder exists
 const uploadDir = path.join(__dirname, "../uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
-// Configure multer
+// Configure multer storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    const safeExt = ALLOWED_IMAGE_EXTENSIONS.has(ext) ? ext : ".tmp";
+    cb(null, `acc-${Date.now()}-${crypto.randomBytes(6).toString("hex")}${safeExt}`);
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB per image
+    files: 11,
+  },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    const mime = (file.mimetype || "").toLowerCase();
+
+    if (!ALLOWED_IMAGE_EXTENSIONS.has(ext) || !ALLOWED_IMAGE_MIME_TYPES.has(mime)) {
+      return cb(new Error(`Unsupported image format '${ext}'. Allowed: JPEG, PNG, WebP, GIF`));
+    }
+
+    cb(null, true);
+  },
+});
 
 const AccessoriesProductImageUpload = (req, res, next) => {
   const uploader = upload.fields([
@@ -24,41 +54,64 @@ const AccessoriesProductImageUpload = (req, res, next) => {
   ]);
 
   uploader(req, res, async (err) => {
-    if (err) return res.status(400).json({ message: err.message });
+    const allFiles = [];
+    if (req.files?.main) allFiles.push(...req.files.main);
+    if (req.files?.covers) allFiles.push(...req.files.covers);
 
-    console.log("🔥 req.files =>", req.files);
-    console.log("🔥 req.body =>", req.body);
+    if (err) {
+      cleanupTempFiles(allFiles);
+      return res.status(400).json({ message: err.message });
+    }
+
+    // 1. Verify magic bytes on disk
+    for (const file of allFiles) {
+      const check = validateImageFile(file, false);
+      if (!check.valid) {
+        cleanupTempFiles(allFiles);
+        return res.status(400).json({ message: check.error || "File signature validation failed" });
+      }
+    }
+
+    const uploadedImages = [];
+    const uploadedS3Keys = [];
 
     try {
-      const uploadedImages = [];
-
-      // Upload main image if exists
-      if (req.files && req.files.main && req.files.main.length > 0) {
+      if (req.files?.main && req.files.main.length > 0) {
         const mainFile = req.files.main[0];
-        const s3Key = `MontresTradingLLC/${Date.now()}-${mainFile.originalname}`;
+        const s3Key = generateSafeS3Key("MontresTradingLLC", mainFile.originalname);
         const url = await uploadToS3(mainFile.path, s3Key, mainFile.mimetype);
-        uploadedImages.push({ url, type: "main", alt: mainFile.originalname });
-        fs.unlinkSync(mainFile.path);
+
+        uploadedS3Keys.push(s3Key);
+        uploadedImages.push({
+          url,
+          type: "main",
+          alt: sanitizeFilename(mainFile.originalname),
+        });
       }
 
-      // Upload cover images if exists
-      if (req.files && req.files.covers && req.files.covers.length > 0) {
+      if (req.files?.covers && req.files.covers.length > 0) {
         for (const file of req.files.covers) {
-          const s3Key = `MontresTradingLLC/${Date.now()}-${file.originalname}`;
+          const s3Key = generateSafeS3Key("MontresTradingLLC", file.originalname);
           const url = await uploadToS3(file.path, s3Key, file.mimetype);
-          uploadedImages.push({ url, type: "cover", alt: file.originalname });
-          fs.unlinkSync(file.path);
+
+          uploadedS3Keys.push(s3Key);
+          uploadedImages.push({
+            url,
+            type: "cover",
+            alt: sanitizeFilename(file.originalname),
+          });
         }
       }
 
-      console.log("✅ Uploaded Images:", uploadedImages);
+      cleanupTempFiles(allFiles);
 
-      // Attach uploaded images to request
       req.body.images = uploadedImages;
       next();
     } catch (error) {
-      console.error("❌ S3 upload error:", error);
-      res.status(500).json({ message: "Error uploading images to S3" });
+      console.error("❌ S3 upload error:", error.message || error);
+      cleanupTempFiles(allFiles);
+      await rollbackS3Uploads(s3, BUCKET, uploadedS3Keys);
+      return res.status(500).json({ message: "Error uploading images to S3" });
     }
   });
 };

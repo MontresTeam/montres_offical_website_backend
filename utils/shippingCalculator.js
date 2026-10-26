@@ -22,11 +22,11 @@ const SHIPPING_RULES = {
 const getRegionFromCountry = (country = "") => {
   const lower = country.trim().toLowerCase();
 
-  const UAE_ALIASES = ["united arab emirates", "uae", "dubai", "abu dhabi", "abudhabi"];
-  const GCC = ["saudi arabia", "bahrain", "kuwait", "qatar", "oman"];
+  const UAE_ALIASES = ["united arab emirates", "uae", "dubai", "abu dhabi", "abudhabi", "ae"];
+  const GCC = ["saudi arabia", "bahrain", "kuwait", "qatar", "oman", "ksa", "sa", "bh", "kw", "qa", "om"];
 
-  if (UAE_ALIASES.includes(lower)) return "local";
-  if (GCC.includes(lower)) return "gcc";
+  if (UAE_ALIASES.some(u => lower === u || lower.includes(u))) return "local";
+  if (GCC.some(g => lower === g || lower.includes(g))) return "gcc";
   return "worldwide";
 };
 

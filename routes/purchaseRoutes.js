@@ -7,9 +7,10 @@ const {
     deletePurchase,
 } = require("../controllers/purchaseController");
 
-// const { adminProtect } = require("../middlewares/authMiddleware");
+const { adminProtect } = require("../middlewares/authMiddleware");
 
-// router.use(adminProtect); // Uncomment to enable protection
+// Apply adminProtect to all routes in this router
+router.use(adminProtect);
 
 router.get("/getPurchase", getPurchases);
 router.post("/", createPurchase);
