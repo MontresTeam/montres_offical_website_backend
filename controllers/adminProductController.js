@@ -430,6 +430,8 @@ const updateProduct = async (req, res) => {
       ...(req.body.acceptance_probability_rules !== undefined && { acceptance_probability_rules: parseJSON(req.body.acceptance_probability_rules) }),
       ...(req.body.auto_counter_offer_threshold !== undefined && { auto_counter_offer_threshold: parseNumber(req.body.auto_counter_offer_threshold) }),
       ...(req.body.offer_expiration_time !== undefined && { offer_expiration_time: parseIntNum(req.body.offer_expiration_time) }),
+      ...(req.body.auto_approve_enabled !== undefined && { auto_approve_enabled: parseBoolean(req.body.auto_approve_enabled) }),
+      ...(req.body.auto_approve_percentage !== undefined && { auto_approve_percentage: parseNumber(req.body.auto_approve_percentage) }),
 
       // Support for publishSchedule updates (including dot notation from frontend)
       ...(req.body.publishSchedule && { publishSchedule: req.body.publishSchedule }),

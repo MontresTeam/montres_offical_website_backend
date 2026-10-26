@@ -428,9 +428,17 @@ const productSchema = new mongoose.Schema(
       default: 80, // Allow offers down to 80% by default
     },
     minimum_offer_amount: {
-      type: Number,
-      default: 0,
-    },
+        type: Number,
+        default: 0,
+      },
+      auto_approve_enabled: {
+        type: Boolean,
+        default: false,
+      },
+      auto_approve_percentage: {
+        type: Number,
+        default: 95,
+      },
     suggested_offer_percentages: {
       type: [Number],
       default: [95, 90, 85],

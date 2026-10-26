@@ -182,7 +182,7 @@ const faqs = [
     },
     {
         trigger: "store_location",
-        response: "📍 Montres Watch Store\n\nMoza Plaza 1\n77FW+MJV Moza Plaza - 1 Al Khor St\nAl Corniche - Deira\nDubai, United Arab Emirates",
+        response: "📍 Montres Watch Store\n\nMONTRES TRADING LLC\nJK Building, Muwaileh Commercial\nSharjah Al Jada, Building 3003, Ground floor 03\nUnited Arab Emirates",
         options: [
             { label: "What are your hours?", trigger: "store_hours" },
             { label: "⬅️ Back",             trigger: "store_visit" },
